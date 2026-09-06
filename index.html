@@ -4751,7 +4751,15 @@ function buildLandmark(scene, P, R, U, H) {
   var lim = visibleHalfAngle(P) * (App.bare ? 1.05 : 0.80);
   var side = R.f() < 0.5 ? -1 : 1;
   var a = side * R.range(lim * 0.22, lim);
-  var dist = R.range(190, 560);
+  /* How far off it can stand and still be read. Fog sets one limit: past it
+     the landmark is the colour of the air. Its own height sets the other: a
+     thing too small to make out is not a landmark either. Neither limit was
+     applied before, so the note in the corner named a windmill the eye could
+     not find. Thick weather leaves no room for one at all. */
+  var byFog = 1.02 / Math.max(P.weather.fogD, 0.0001);
+  if (byFog < 150) { App.landmark = null; return; }
+  var far = Math.min(560, byFog, (L.scale[0] + L.scale[1]) * 0.5 / 0.045);
+  var dist = R.range(Math.min(190, far * 0.78), far);
   var x = Math.sin(a) * dist, z = -Math.cos(a) * dist;
   var y = H(x, z);
   if (kind === 'jetty' && P.waterY != null) y = P.waterY - 0.4;
