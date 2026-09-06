@@ -3746,7 +3746,13 @@ function solidMat(U, colour, opts) {
       '  float diff = max(dot(n, normalize(uSunDir)), 0.0);',
       '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.30, 1.0, baked(wp.xz));',
       '  float ao = mix(0.55, 1.0, smoothstep(0.0, 0.35, position.y));',
-      '  vCol = uBody * (uAmbCol * 1.1 + uSunCol * (diff * 1.15 + 0.10) * sh) * ao;',
+      /* Ambient light carried no direction, so anything the sun did not reach
+         came out evenly lit: a trunk read as a flat plank. The sky is
+         brightest toward the sun, so lean the ambient that way. Averaged over
+         a sphere the factor is 1.0, so nothing changes in overall brightness,
+         but a cylinder now turns from light to dark around its girth. */
+      '  float sky = 0.72 + 0.56 * (dot(n, normalize(uSunDir)) * 0.5 + 0.5);',
+      '  vCol = uBody * (uAmbCol * 1.1 * sky + uSunCol * (diff * 1.15 + 0.10) * sh) * ao;',
       '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  vCol = mix(vCol, hazeToward(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol), fogAmtH(-mv.z, uFogDensity, wp.y));',
