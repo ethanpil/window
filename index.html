@@ -3729,11 +3729,12 @@ function solidMat(U, colour, opts) {
       uBarkPlate: { value: opts.barkPlate || 5.0 },
       uLichen: { value: new THREE.Color(opts.lichen || '#8f9a3c') },
       uNodes: { value: opts.nodes || 0 },
-      uGrain: { value: opts.grain || 0 }
+      uGrain: { value: opts.grain || 0 },
+      uSpin: { value: opts.spin || 0 }
     },
     vertexShader: [
       'attribute vec3 iPos; attribute vec4 iAttr; attribute float rib;',
-      'uniform float uTime, uFogDensity, uShadow;',
+      'uniform float uTime, uFogDensity, uShadow, uSpin;',
       'uniform vec3 uSunDir, uSunCol, uAmbCol, uBody, uFogCol;',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
       GLSL_COMMON,
@@ -3741,11 +3742,19 @@ function solidMat(U, colour, opts) {
       '  float sc = iAttr.x, rot = iAttr.y;',
       '  float c = cos(rot), s = sin(rot);',
       '  vec3 lp = position * vec3(sc, sc * iAttr.z, sc * iAttr.w);',
+      '  vec3 nl = normal;',
+      /* a turning part spins about its own z before it is placed, so a set of
+         windmill sails keeps its hub while it goes round */
+      '  if (uSpin != 0.0) {',
+      '    float sa = uSpin * uTime, cs = cos(sa), ss = sin(sa);',
+      '    lp.xy = vec2(lp.x * cs - lp.y * ss, lp.x * ss + lp.y * cs);',
+      '    nl.xy = vec2(nl.x * cs - nl.y * ss, nl.x * ss + nl.y * cs);',
+      '  }',
       '  vec3 wp = iPos + vec3(lp.x * c - lp.z * s, lp.y, lp.x * s + lp.z * c);',
-      '  vec3 n = normalize(vec3(normal.x * c - normal.z * s, normal.y, normal.x * s + normal.z * c));',
+      '  vec3 n = normalize(vec3(nl.x * c - nl.z * s, nl.y, nl.x * s + nl.z * c));',
       '  float diff = max(dot(n, normalize(uSunDir)), 0.0);',
       '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.30, 1.0, baked(wp.xz));',
-      '  float ao = mix(0.55, 1.0, smoothstep(0.0, 0.35, position.y));',
+      '  float ao = uSpin != 0.0 ? 1.0 : mix(0.55, 1.0, smoothstep(0.0, 0.35, position.y));',
       /* Ambient light carried no direction, so anything the sun did not reach
          came out evenly lit: a trunk read as a flat plank. The sky is
          brightest toward the sun, so lean the ambient that way. Averaged over
@@ -4683,6 +4692,28 @@ var LANDMARKS = {
   watertank:  { biomes: ['desert', 'saltflat', 'savanna', 'urban', 'farmland', 'hayfield'], scale: [8, 12], body: '#9aa0a2', trim: '#6f7476' },
   jetty:      { biomes: ['lakefront', 'coast', 'marsh', 'river'], scale: [6, 9], body: '#6a5a45', trim: '#4e4235' }
 };
+/* Where the windshaft sits on the tower, in the same units as landmarkGeo. */
+var WINDMILL_HUB = [0, 0.74, -0.22];
+/* Four sails on one shaft, built about the origin so the whole cross turns
+   about z. Each is a stock out from the hub with bars laid across it: that
+   lattice is what reads as a mill rather than as a mast with arms. */
+function windmillSailGeo() {
+  var B = { pos: [], nor: [], idx: [], rib: [] }, i, k;
+  var len = 0.46;
+  for (i = 0; i < 4; i++) {
+    var a = i * 1.5708;
+    /* the stock, running from the hub out to the tip */
+    pushBox(B, Math.cos(a) * len * 0.5, Math.sin(a) * len * 0.5, 0, len * 0.5, 0.017, 0.014, 0, a);
+    /* the bars across it, shorter toward the tip */
+    for (k = 1; k <= 5; k++) {
+      var t = k / 5.6, w = 0.085 * (1 - t * 0.4);
+      pushBox(B, Math.cos(a) * len * t, Math.sin(a) * len * t, 0, 0.011, w, 0.010, 0, a);
+    }
+  }
+  pushBox(B, 0, 0, 0, 0.045, 0.045, 0.045, 0);              /* the hub itself */
+  return finishGeo(B);
+}
+
 function landmarkGeo(kind, R) {
   var B = { pos: [], nor: [], idx: [], rib: [] }, i;
   if (kind === 'lighthouse') {
@@ -4694,12 +4725,9 @@ function landmarkGeo(kind, R) {
   } else if (kind === 'windmill') {
     pushCyl(B, 0, 0, 0, 0.26, 0.15, 0.86, 12);
     pushCone(B, 0, 0.86, 0, 0.19, 0.20, 12);
-    var ang = R.range(0, 1.57);
-    for (i = 0; i < 4; i++) {                              /* sails */
-      var a = ang + i * 1.5708, ca = Math.cos(a), sa = Math.sin(a);
-      pushBox(B, ca * 0.36, 0.72 + sa * 0.36, -0.19, 0.36, 0.05, 0.015, 0);
-      B.pos.length = B.pos.length;                          /* (kept axis-aligned; the mill faces the window) */
-    }
+    /* the windshaft the sails turn on, and a gallery round the tower */
+    pushBox(B, 0, WINDMILL_HUB[1], -0.13, 0.035, 0.035, 0.10, 0);
+    pushBox(B, 0, 0.30, 0, 0.30, 0.020, 0.30, 0);
   } else if (kind === 'tower') {
     pushBox(B, 0, 0.44, 0, 0.20, 0.44, 0.20, R.range(0, 0.6));
     for (i = 0; i < 4; i++) {                               /* broken battlements */
@@ -4779,6 +4807,15 @@ function buildLandmark(scene, P, R, U, H) {
   var mat = solidMat(U, L.body, { rib: 0, grain: 0, spines: 0, body2: L.trim });
   instanceSolid(scene, landmarkGeo(kind, R), [[x, y, z, sz, 0, 1, 1]], mat);
   App._shadows.push([x, y, z, sz * 0.30, 0.85, sz]);
+  if (kind === 'windmill') {
+    /* The sails are their own mesh, set at the windshaft and turned about it
+       by the shader. A mill sets its sails to the wind, so it runs with the
+       weather, slowly, and always the same way round. */
+    var hub = [x + WINDMILL_HUB[0] * sz, y + WINDMILL_HUB[1] * sz, z + WINDMILL_HUB[2] * sz];
+    var rate = -(0.30 + P.windBase * 0.55);
+    instanceSolid(scene, windmillSailGeo(), [[hub[0], hub[1], hub[2], sz, 0, 1, 1]],
+      solidMat(U, L.trim, { rib: 0, grain: 0, spines: 0, body2: L.body, spin: rate }));
+  }
   App.landmark = { kind: kind, x: x, y: y, z: z, size: sz, lit: !!L.lit, smoke: !!L.smoke };
   App._features.push(['landmark ' + kind, x, z]);
   P.landmarkName = kind;
