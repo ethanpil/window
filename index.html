@@ -3558,7 +3558,10 @@ function pushTube(B, path, radii, seg, ribs) {
     ref.set(Math.abs(T.y) > 0.94 ? 1 : 0, Math.abs(T.y) > 0.94 ? 0 : 1, 0);
     N.crossVectors(ref, T).normalize();
     Bi.crossVectors(T, N).normalize();
-    for (j = 0; j < seg; j++) {
+    /* the ring closes on a repeated vertex, as pushCyl does, so the stripe
+       coordinate can reach 1 instead of falling back to 0 across the last
+       face and running the whole bark pattern backwards down one seam */
+    for (j = 0; j <= seg; j++) {
       var ang = (j / seg) * 6.283185;
       var cx = Math.cos(ang), sy = Math.sin(ang);
       var nx = N.x * cx + Bi.x * sy, ny = N.y * cx + Bi.y * sy, nz = N.z * cx + Bi.z * sy;
@@ -3568,10 +3571,11 @@ function pushTube(B, path, radii, seg, ribs) {
       B.rib.push(j / seg);
     }
   }
+  var ring = seg + 1;
   for (i = 0; i < path.length - 1; i++) {
     for (j = 0; j < seg; j++) {
-      var j2 = (j + 1) % seg;
-      var r0 = start + i * seg, r1 = start + (i + 1) * seg;
+      var j2 = j + 1;
+      var r0 = start + i * ring, r1 = start + (i + 1) * ring;
       B.idx.push(r0 + j, r1 + j, r0 + j2);
       B.idx.push(r0 + j2, r1 + j, r1 + j2);
     }
