@@ -4615,20 +4615,26 @@ function buildFlyers(scene, P, R, U, H) {
    Something to look at that isn't landscape: a lighthouse on the headland, a
    windmill over the fields, a tower on the moor. One per world, placed off to
    one side at two to six hundred metres, and sized to read at that range. */
-function pushBox(B, cx, cy, cz, hx, hy, hz, rot) {
+/* rz leans the box in its own xy plane before rot turns it about y, which is
+   what a truss diagonal, an arch stone and a windmill sail need. Callers that
+   leave it out get the old behaviour exactly. */
+function pushBox(B, cx, cy, cz, hx, hy, hz, rot, rz) {
   var c = Math.cos(rot || 0), s = Math.sin(rot || 0), i;
+  var cr = Math.cos(rz || 0), sr = Math.sin(rz || 0);
   var start = B.pos.length / 3;
   var corners = [[-1,-1,-1],[1,-1,-1],[1,-1,1],[-1,-1,1],[-1,1,-1],[1,1,-1],[1,1,1],[-1,1,1]];
   var faces = [[0,1,2,3],[4,7,6,5],[0,4,5,1],[1,5,6,2],[2,6,7,3],[3,7,4,0]];
   var norms = [[0,-1,0],[0,1,0],[0,0,-1],[1,0,0],[0,0,1],[-1,0,0]];
   for (var f = 0; f < 6; f++) {
     var n = norms[f];
-    var nx = n[0] * c - n[2] * s, nz = n[0] * s + n[2] * c;
+    var mx = n[0] * cr - n[1] * sr, my = n[0] * sr + n[1] * cr;
+    var nx = mx * c - n[2] * s, nz = mx * s + n[2] * c;
     for (var k = 0; k < 4; k++) {
       var p = corners[faces[f][k]];
-      var px = p[0] * hx, py = p[1] * hy, pz = p[2] * hz;
+      var ax = p[0] * hx, ay = p[1] * hy, pz = p[2] * hz;
+      var px = ax * cr - ay * sr, py = ax * sr + ay * cr;
       B.pos.push(cx + px * c - pz * s, cy + py, cz + px * s + pz * c);
-      B.nor.push(nx, n[1], nz);
+      B.nor.push(nx, my, nz);
       B.rib.push(0);
     }
     var o = start + f * 4;
