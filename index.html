@@ -5092,7 +5092,9 @@ function baleGeo(R, upright) {
   var B = { pos: [], nor: [], idx: [], rib: [] };
   var seg = 20, hl = R.range(0.46, 0.58), r = 0.5;
   var ax = function (t) { return upright ? [0, 0.5 + t * 2 * hl - hl, 0] : [t * 2 * hl - hl, 0.5, 0]; };
-  var rad = function (a) { return upright ? [Math.cos(a) * r, 0, Math.sin(a) * r] : [0, Math.cos(a) * r, Math.sin(a) * r]; };
+  /* both frames turn the same way about their own axis, or one of the two
+     orientations builds its drum inside out */
+  var rad = function (a) { return upright ? [Math.cos(a) * r, 0, Math.sin(a) * r] : [0, Math.cos(a) * r, -Math.sin(a) * r]; };
   var i, k;
   /* the drum */
   for (i = 0; i <= seg; i++) {
@@ -5118,8 +5120,8 @@ function baleGeo(R, upright) {
       B.rib.push(1);                        /* the face reads as one band */
     }
     for (i = 0; i < seg; i++) {
-      if (e) B.idx.push(c0, c0 + 1 + i, c0 + 2 + i);
-      else B.idx.push(c0, c0 + 2 + i, c0 + 1 + i);
+      if (e) B.idx.push(c0, c0 + 2 + i, c0 + 1 + i);
+      else B.idx.push(c0, c0 + 1 + i, c0 + 2 + i);
     }
   }
   var geo = new THREE.BufferGeometry();
