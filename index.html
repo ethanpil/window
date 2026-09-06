@@ -3717,7 +3717,7 @@ function solidMat(U, colour, opts) {
       uSpine: { value: new THREE.Color(opts.spineCol || '#e8dfb4') },
       uRib: { value: opts.rib == null ? 1 : opts.rib },
       uRibN: { value: opts.ribN || 16 },
-      uSpines: { value: opts.spines == null ? 1 : opts.spines },
+      uSpines: { value: opts.spines || 0 },
       uTipCol: { value: new THREE.Color(opts.tipCol || '#000000') },
       uTipMix: { value: opts.tipMix || 0 },
       uBody2: { value: new THREE.Color(opts.body2 || colour) },
