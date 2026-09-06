@@ -4998,28 +4998,53 @@ function bridgeGeo(P, R, H) {
       }
     }
   } else if (kind === 'stone') {
+    /* Round arches carried on piers. The voussoirs were axis-aligned boxes set
+       around a curve that bent downward, so the ring read as a row of flat
+       plates hanging in the air under the deck. Put the curve the right way up
+       and lay each stone along its own radius. */
     var arches = R.int(3, 6), aw = span / arches;
+    var rr = Math.min(aw * 0.40, drop * 0.42), ringT = Math.max(0.5, aw * 0.05);
+    var spring = -1.0 - rr, VN = 15, k, q;
     for (i = 0; i < arches; i++) {
       var px = -span * 0.5 + aw * (i + 0.5);
-      if (i > 0) pushBox(B, px - aw * 0.5, -drop * 0.42, 0, aw * 0.14, drop * 0.42, deckW * 0.5, 0);
-      for (var k = 0; k < 12; k++) {
-        var u0 = k / 12, ang = Math.PI * u0;
-        var rr = aw * 0.42;
-        pushBox(B, px - Math.cos(ang) * rr, -Math.sin(ang) * rr * 0.8 - 0.4, 0, aw * 0.06, 0.34, deckW * 0.5, 0);
+      for (k = 0; k <= VN; k++) {
+        var ang = Math.PI * (k / VN);
+        pushBox(B, px - Math.cos(ang) * rr, spring + Math.sin(ang) * rr, 0,
+                Math.PI * rr / VN * 0.62, ringT * 0.5, deckW * 0.5, 0, Math.PI * 0.5 - ang);
+      }
+      /* the spandrel: wall over the haunch of the arch, up to the roadway */
+      for (q = 0; q < 14; q++) {
+        var sx = (q / 14 - 0.5 + 1 / 28) * aw;
+        var ay = Math.abs(sx) < rr ? spring + Math.sqrt(rr * rr - sx * sx) : spring;
+        if (ay < -0.25) pushBox(B, px + sx, (ay - 0.25) * 0.5, 0, aw / 28 + 0.05, (-0.25 - ay) * 0.5, deckW * 0.5, 0);
+      }
+      if (i > 0) pushBox(B, px - aw * 0.5, (spring - drop) * 0.5, 0, aw * 0.12, (spring + drop) * 0.5, deckW * 0.48, 0);
+    }
+    pushBox(B, -span * 0.5, (spring - drop) * 0.5, 0, aw * 0.16, (spring + drop) * 0.5, deckW * 0.48, 0);
+    pushBox(B, span * 0.5, (spring - drop) * 0.5, 0, aw * 0.16, (spring + drop) * 0.5, deckW * 0.48, 0);
+  } else { /* girder: a plate truss each side of the deck, piers to the floor */
+    var gTop = -0.85, gBot = -2.75, gH = (gTop - gBot) * 0.5, gMid = (gTop + gBot) * 0.5;
+    var bay = span * 0.96 / 24;
+    for (var gs = -1; gs <= 1; gs += 2) {
+      var gz = gs * deckW * 0.40;
+      pushBox(B, 0, gTop, gz, span * 0.5, 0.24, 0.30, 0);       /* top chord */
+      pushBox(B, 0, gBot, gz, span * 0.5, 0.24, 0.30, 0);       /* bottom chord */
+      /* the web: an upright at every bay with a diagonal between each pair.
+         These were boxes turned about y, which laid flat plates out sideways
+         under the deck instead of bracing anything. */
+      for (i = 0; i <= 24; i++) {
+        var dx = (i / 24 - 0.5) * span * 0.96;
+        pushBox(B, dx, gMid, gz, 0.16, gH, 0.22, 0);
+        if (i < 24) {
+          var lean = Math.atan2(bay, gH * 2) * (i % 2 ? 1 : -1);
+          pushBox(B, dx + bay * 0.5, gMid, gz, 0.14, Math.sqrt(bay * bay + gH * gH * 4) * 0.5, 0.18, 0, lean);
+        }
       }
     }
-    pushBox(B, -span * 0.5, -drop * 0.42, 0, aw * 0.14, drop * 0.42, deckW * 0.5, 0);
-    pushBox(B, span * 0.5, -drop * 0.42, 0, aw * 0.14, drop * 0.42, deckW * 0.5, 0);
-  } else { /* girder: a truss under the deck, piers to the floor */
-    pushBox(B, 0, -1.6, 0, span * 0.5, 0.9, deckW * 0.42, 0);
     var piers = R.int(2, 4);
     for (i = 0; i < piers; i++) {
       var qx = (i / (piers - 1) - 0.5) * span * 0.72;
-      pushBox(B, qx, -drop * 0.5 - 1.6, 0, 1.5, drop * 0.5, deckW * 0.34, 0);
-    }
-    for (i = 0; i < 26; i++) {
-      var dx = (i / 25 - 0.5) * span * 0.94;
-      pushBox(B, dx, -1.6, 0, 0.20, 0.9, deckW * 0.44, R.range(-0.5, 0.5));
+      pushBox(B, qx, -drop * 0.5 - 2.75, 0, 1.5, drop * 0.5, deckW * 0.34, 0);
     }
   }
   P.bridgeSpan = span; P.bridgeW = deckW; P.bridgeTh = th; P.bridgeRoad = roadHalf * 2;
