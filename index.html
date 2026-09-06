@@ -6809,6 +6809,9 @@ function buildPrecip(scene, P, R, U) {
         '  float y = mod(iPos.y - uTime * speed, range);',
         '  float slant = uWind * (0.35 + 0.5 * uGust) * 0.5;',
         '  vec3 wp = vec3(iPos.x + uWindDir.x * (range - y) * slant * 0.35, y, iPos.z + uWindDir.y * (range - y) * slant * 0.35);',
+        /* an on-shore wind must not blow a drop through the glass: wrap the
+           drift back into the outdoor band, as the flakes do */
+        '  wp.z = mod(wp.z + 58.0, 56.5) - 58.0;',
         '  vec3 dir = normalize(vec3(uWindDir.x * slant, -1.0, uWindDir.y * slant));',
         '  vec3 toCam = normalize(uCamPos - wp);',
         '  vec3 right = normalize(cross(dir, toCam));',
