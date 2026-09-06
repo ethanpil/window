@@ -4933,16 +4933,38 @@ function buildBeacon(scene, P, R, U, x, y, z, sz) {
 /* A bridge across the gorge, in one of four styles, with cars crossing it.
    The deck is instanced once; the traffic is a stream of small boxes whose
    position along the deck is a function of time, so it costs nothing. */
-function bridgeGeo(P, R) {
+function bridgeGeo(P, R, H) {
   var B = { pos: [], nor: [], idx: [], rib: [] };
   var span = P.gorgeW * 2.6 + 40, deckW = R.range(9, 15), th = R.range(0.8, 1.6);
-  var kind = P.bridgeKind, drop = P.bridgeDeck - P.waterY;
   var i;
+  /* The road carries well past the span, so the traffic leaves the view
+     instead of driving into the bank. */
+  var roadHalf = span * 0.5 + 130;
+  /* The deck level came from the gorge depth alone and was never compared
+     with the land, so it often sat below the rim: the ends of the span were
+     buried and the cars went into the dirt. Lift it clear of every piece of
+     ground the road crosses. */
+  var rim = -1e9;
+  for (i = -24; i <= 24; i++) rim = Math.max(rim, H(i / 24 * roadHalf, P.bridgeZ));
+  P.bridgeDeck = rim + th * 0.5 + 0.6;
+  var kind = P.bridgeKind, drop = P.bridgeDeck - P.waterY;
   /* the roadway */
   pushBox(B, 0, 0, 0, span * 0.5, th * 0.5, deckW * 0.5, 0);
-  /* parapets */
-  pushBox(B, 0, th * 0.5 + 0.5, deckW * 0.5 - 0.3, span * 0.5, 0.5, 0.22, 0);
-  pushBox(B, 0, th * 0.5 + 0.5, -deckW * 0.5 + 0.3, span * 0.5, 0.5, 0.22, 0);
+  /* the approach either side, on fill that reaches below the ground so that
+     it meets the land instead of floating over it */
+  var segs = 22;
+  for (i = 0; i < segs; i++) {
+    var e0 = span * 0.5 + (roadHalf - span * 0.5) * (i / segs);
+    var e1 = span * 0.5 + (roadHalf - span * 0.5) * ((i + 1) / segs);
+    for (var sd = -1; sd <= 1; sd += 2) {
+      var gy = Math.min(H(sd * e0, P.bridgeZ), H(sd * e1, P.bridgeZ)) - 4.0 - P.bridgeDeck;
+      pushBox(B, sd * (e0 + e1) * 0.5, (th * 0.5 + gy) * 0.5, 0,
+              (e1 - e0) * 0.5 + 0.1, (th * 0.5 - gy) * 0.5, deckW * 0.44, 0);
+    }
+  }
+  /* parapets, the length of the road */
+  pushBox(B, 0, th * 0.5 + 0.5, deckW * 0.5 - 0.3, roadHalf, 0.5, 0.22, 0);
+  pushBox(B, 0, th * 0.5 + 0.5, -deckW * 0.5 + 0.3, roadHalf, 0.5, 0.22, 0);
   if (kind === 'suspension') {
     var towH = drop * R.range(0.42, 0.72), tx = span * R.range(0.20, 0.30);
     for (i = -1; i <= 1; i += 2) {
@@ -5000,17 +5022,17 @@ function bridgeGeo(P, R) {
       pushBox(B, dx, -1.6, 0, 0.20, 0.9, deckW * 0.44, R.range(-0.5, 0.5));
     }
   }
-  P.bridgeSpan = span; P.bridgeW = deckW; P.bridgeTh = th;
+  P.bridgeSpan = span; P.bridgeW = deckW; P.bridgeTh = th; P.bridgeRoad = roadHalf * 2;
   return finishGeo(B);
 }
 function buildBridge(scene, P, R, U, H) {
   var col = { suspension: '#9aa2a6', arch: '#8e9498', girder: '#6f5a4a', stone: '#a3968a' }[P.bridgeKind];
   var mat = solidMat(U, col, { rib: 0, grain: 0, spines: 0, body2: '#6d6a66' });
-  var geo = bridgeGeo(P, R);
+  var geo = bridgeGeo(P, R, H);
   instanceSolid(scene, geo, [[0, P.bridgeDeck, P.bridgeZ, 1, 0, 1, 1]], mat);
   App._shadows.push([0, P.bridgeDeck, P.bridgeZ, P.bridgeSpan * 0.22, 0.75, 2]);
   buildTraffic(scene, P, R, U, {
-    y: P.bridgeDeck + P.bridgeTh * 0.5, z: P.bridgeZ, len: P.bridgeSpan,
+    y: P.bridgeDeck + P.bridgeTh * 0.5, z: P.bridgeZ, len: P.bridgeRoad,
     lanes: [-P.bridgeW * 0.22, P.bridgeW * 0.22], axis: 'x', rate: P.trafficRate
   });
 }
