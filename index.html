@@ -3783,12 +3783,19 @@ function solidMat(U, colour, opts) {
       '  if (uRib > 0.01) c *= 1.0 + 0.16 * uRib * cos(rr) * kRib;',
       '  if (uSpines > 0.01) {',
       '    float kSpine = min(kRib, bandLimit(vUp, 26.0 * uSpines));',
-      '    float onRib = uRib > 0.01 ? smoothstep(0.80, 1.0, abs(cos(rr))) : smoothstep(0.7, 1.0, fract(sin(floor(vRib * 40.0) * 7.1 + vSeed) * 43758.5));',
-      '    float row = smoothstep(0.40, 0.62, fract(vUp * 26.0 * uSpines));',
+      /* An areole sits on the crest of a rib, at steps up the plant, and the
+         steps of one rib do not line up with those of the next. A band across
+         a band gave a grid of squares instead, and with nothing seeded into
+         it every plant wore the same one. Stagger the steps per rib and carry
+         the instance seed into both coordinates. */
+      '    float crest = uRib > 0.01 ? smoothstep(0.55, 1.0, abs(cos(rr))) : smoothstep(0.7, 1.0, fract(sin(floor(vRib * 40.0) * 7.1 + vSeed) * 43758.5));',
+      '    float ribIdx = floor(vRib * uRibN + 0.5);',
+      '    float stepUp = fract(vUp * 26.0 * uSpines + vSeed * 0.62 + fract(sin(ribIdx * 12.9 + vSeed) * 4375.5));',
+      '    float areole = smoothstep(0.32, 0.5, stepUp) * smoothstep(0.68, 0.5, stepUp);',
       /* past the limit the spines average into a slight overall paleness
          rather than vanishing or crawling */
-      '    float amt = clamp(onRib * row * 0.45 * uSpines, 0.0, 0.85);',
-      '    c = mix(c, uSpine * (0.35 + 0.65 * length(vCol)), mix(0.10 * uSpines, amt, kSpine));',
+      '    float amt = clamp(crest * areole * 0.70 * uSpines, 0.0, 0.85);',
+      '    c = mix(c, uSpine * (0.35 + 0.65 * length(vCol)), mix(0.09 * uSpines, amt, kSpine));',
       '  }',
       '  c = mix(c, uTipCol * (0.4 + 0.6 * length(vCol)), uTipMix * smoothstep(0.72, 1.0, vUp));',
       '  if (uNodes > 0.5) {',
