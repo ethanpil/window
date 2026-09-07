@@ -4284,14 +4284,20 @@ function trunkTemplate(R, kind) {
       var x = lx * t * t + curve * Math.sin(t * 3.4 + ph) * (0.25 + t * 0.75);
       var zz = lz * t * t + curve * 0.7 * Math.sin(t * 2.7 + ph2) * (0.25 + t * 0.75);
       path.push([x, -0.04 + t * (h + 0.04), zz]);
-      /* the flare dies away fast, then the trunk tapers evenly */
-      radii.push(r0 * (1 + flare * Math.exp(-t * flareK)) * (1 - t * tp) * (1 + 0.05 * Math.sin(t * 11.0 + ph)));
+      /* The flare dies away, then the trunk tapers - but not evenly. An even
+         taper over a perfect circle is a bollard, so most of the narrowing is
+         saved for higher up and the girth swells and pinches on the way. */
+      radii.push(r0 * (1 + flare * Math.exp(-t * flareK)) * (1 - tp * Math.pow(t, 1.4))
+        * (1 + 0.09 * Math.sin(t * 7.0 + ph) + 0.05 * Math.sin(t * 17.0 + ph2)));
     }
     return { path: path, radii: radii, tipX: path[segs][0], tipZ: path[segs][2] };
   };
 
+  /* A trunk is not a turned post. A few shallow lobes down its length are
+     what tell the eye it grew rather than being machined. */
+  var lobes = { n: R.int(3, 6), amp: R.range(0.05, 0.10) };
   var main = mk(top, lean, lean2, baseR, taper);
-  pushTube(B, main.path, main.radii, sides);
+  pushTube(B, main.path, main.radii, sides, lobes);
   var tips = [[main.tipX, top, main.tipZ]];
 
   if (shape === 'forked') {
@@ -4299,7 +4305,7 @@ function trunkTemplate(R, kind) {
     var fa = R.range(0, 6.283), fr = R.range(0.10, 0.20), fh = top * R.range(0.85, 1.05);
     var f2 = mk(fh, Math.cos(fa) * fr, Math.sin(fa) * fr, baseR * R.range(0.72, 0.88), taper);
     for (var k = 0; k < f2.path.length; k++) { f2.path[k][1] = -0.04 + (k / (f2.path.length - 1)) * (fh + 0.04); }
-    pushTube(B, f2.path, f2.radii, sides);
+    pushTube(B, f2.path, f2.radii, sides, lobes);
     tips.push([f2.tipX, fh, f2.tipZ]);
   }
 
