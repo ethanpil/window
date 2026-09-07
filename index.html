@@ -4738,18 +4738,10 @@ function pushCone(B, cx, cy, cz, r, h, seg, invert) {
     B.idx.push(o, o + 1, o + 2);
   }
 }
-/* alongZ lays the cylinder on its side, running from cz to cz + h, which is
-   what a wheel needs. The sweep turns the other way in that case, or the
-   frame is left handed and the drum comes out inside out. */
-function pushCyl(B, cx, cy, cz, r0, r1, h, seg, alongZ) {
+function pushCyl(B, cx, cy, cz, r0, r1, h, seg) {
   var start = B.pos.length / 3, i;
   for (i = 0; i <= seg; i++) {
     var a = (i / seg) * 6.2832, ca = Math.cos(a), sa = Math.sin(a);
-    if (alongZ) {
-      B.pos.push(cx + ca * r0, cy - sa * r0, cz); B.nor.push(ca, -sa, 0); B.rib.push(i / seg);
-      B.pos.push(cx + ca * r1, cy - sa * r1, cz + h); B.nor.push(ca, -sa, 0); B.rib.push(i / seg);
-      continue;
-    }
     B.pos.push(cx + ca * r0, cy, cz + sa * r0); B.nor.push(ca, 0.1, sa); B.rib.push(i / seg);
     B.pos.push(cx + ca * r1, cy + h, cz + sa * r1); B.nor.push(ca, 0.1, sa); B.rib.push(i / seg);
   }
@@ -4766,7 +4758,6 @@ var LANDMARKS = {
   barn:       { biomes: ['farmland', 'orchard', 'blossom', 'meadow', 'savanna', 'hayfield'], scale: [7, 11], body: '#7a3f31', trim: '#6b6259', smoke: [-0.33, 0.88] },
   house:      { biomes: ['moor', 'meadow', 'farmland', 'autumn', 'hayfield', 'lavender', 'river', 'tundra'], scale: [7, 10], body: '#a2988a', trim: '#5f544a' },
   smokestack: { biomes: ['moor', 'farmland', 'urban', 'hayfield', 'river', 'marsh'], scale: [16, 26], body: '#8a5a44', trim: '#6b4636', smoke: [0, 0.95] },
-  tractor:    { biomes: ['farmland', 'hayfield', 'meadow', 'orchard', 'flowerfield', 'lavender'], scale: [3.2, 4.6], body: '#8f4a33', trim: '#332f2c' },
   silo:       { biomes: ['farmland', 'orchard'], scale: [9, 14], body: '#b9b3a4', trim: '#8a857a' },
   cabin:      { biomes: ['alpine', 'lakefront', 'river', 'autumn', 'tundra', 'marsh', 'oasis'], scale: [5, 8], body: '#6b543c', trim: '#4a3a2a', smoke: [-0.24, 0.82] },
   pagoda:     { biomes: ['terraces'], scale: [8, 13], body: '#7d4a3a', trim: '#3f3630' },
@@ -4873,18 +4864,6 @@ function landmarkGeo(kind, R) {
     pushCyl(B, 0, 0.16, 0, sr * 1.7, sr, sh - 0.16, 14);
     mark(function () { pushCyl(B, 0, sh - 0.03, 0, sr * 1.22, sr * 1.16, sr * 0.6, 14); });
     if (R.f() < 0.7) pushBox(B, bw * 1.6, 0.07, 0, bw * 0.6, 0.07, bw * 0.5, 0);
-  } else if (kind === 'tractor') {
-    /* left standing at the end of a row */
-    var tl = R.range(0.55, 0.72);
-    pushBox(B, 0, 0.44, 0, tl, 0.17, 0.25, 0);
-    pushBox(B, -tl * 0.42, 0.78, 0, 0.20, 0.24, 0.23, 0);             /* cab */
-    pushBox(B, tl * 0.68, 0.68, 0.10, 0.045, 0.17, 0.045, 0);          /* exhaust */
-    mark(function () {
-      for (var wq = -1; wq <= 1; wq += 2) {
-        pushCyl(B, -tl * 0.34, 0.37, wq * 0.29 - 0.06, 0.37, 0.37, 0.12, 12, true);
-        pushCyl(B, tl * 0.62, 0.19, wq * 0.26 - 0.05, 0.19, 0.19, 0.10, 10, true);
-      }
-    });
   } else if (kind === 'silo') {
     pushCyl(B, 0, 0, 0, 0.20, 0.20, 0.84, 14);
     pushCone(B, 0, 0.84, 0, 0.22, 0.18, 14);
@@ -8726,7 +8705,7 @@ function updateHUD(P) {
   if (P.biomeKey === 'canyon') EXTRA = ' &middot; ' + Math.round(P.canyonDepth) + 'm deep' + (P.hasCanyonRiver ? ', river below' : '');
   if (P.biomeKey === 'oasis' && P.hasCamp) EXTRA = ' &middot; a camp by the water';
   var LMNAME = { lighthouse: 'a lighthouse', windmill: 'a windmill', tower: 'an old tower', barn: 'a barn',
-    house: 'an empty house', smokestack: 'a chimney stack', tractor: 'a tractor',
+    house: 'an empty house', smokestack: 'a chimney stack',
     silo: 'a grain silo', cabin: 'a cabin', pagoda: 'a pagoda', watertank: 'a water tank', jetty: 'a jetty' };
   document.getElementById('note').innerHTML = P.biome.label + ' in ' + P.season.label + ' &middot; ' + P.weather.label +
     ' &middot; ' + hour + ' &middot; ' + windWord + ' ' + P.windName +
