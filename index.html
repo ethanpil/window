@@ -60,7 +60,7 @@
   /* The description changes length with every seed. On its own line it cannot
      push the controls around, and each control is sized for its longest label
      so toggling one never nudges its neighbours. */
-  #hud .row.desc { padding-bottom: 1px; }
+  #hud .row.desc { padding: 0 20px 1px; }   /* clear of the close button */
   #hud .row.controls button { text-align: left; display: inline-flex; align-items: center; gap: 7px; }
   #hud .row.controls button svg { width: 13px; height: 13px; flex: none; opacity: .85; }
   #hud .row.controls button:hover svg { opacity: 1; }
@@ -121,6 +121,9 @@
   #bPick[aria-expanded="true"] { color: #fff5e2; }
   #bPick[aria-expanded="true"] svg { transform: rotate(60deg); }
   .iconbtn:hover, .iconbtn:focus-visible { color: #fff5e2; border-bottom: 0; }
+  #bClose { position: absolute; top: 2px; right: 4px; opacity: .45; }
+  #bClose svg { width: 12px; height: 12px; }
+  #bClose:hover, #bClose:focus-visible { opacity: 1; }
   .iconbtn.done { color: #b9d6a8; }
   #hud .row.sub button:hover { opacity: 1; }
   #note {
@@ -179,6 +182,7 @@
 <div id="curtain"></div>
 
 <div id="hud">
+  <button id="bClose" class="iconbtn" aria-label="Hide this bar" title="Hide this bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   <div class="row desc"><span id="note" aria-live="polite"></span></div>
   <div class="row controls" id="rowControls">
     <button id="bNew" title="Open a different window (R)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg><span>new view</span></button>
@@ -8459,6 +8463,27 @@ function wake(hold) {
     if (panel && !panel.hidden) setPickOpen(false, true);
   }, 2800);
 }
+/* Put the bar away now rather than waiting out its timer. Three things hold
+   it open - the pointer resting on it, focus inside it, and the pin - so all
+   three have to be let go of, or it would come straight back. */
+function hideHud() {
+  var hud = document.getElementById('hud');
+  clearTimeout(wakeTimer);
+  hudHeld = false;
+  if (App.pinned) {
+    App.pinned = false;
+    Prefs.set('pinned', false);
+    var pin = document.getElementById('bPin');
+    pin.classList.remove('pinned');
+    pin.setAttribute('aria-pressed', 'false');
+    pin.title = 'Keep this bar on screen';
+  }
+  if (document.activeElement && hud.contains(document.activeElement)) document.activeElement.blur();
+  var panel = document.getElementById('pick');
+  if (panel && !panel.hidden) setPickOpen(false, true);
+  hud.classList.remove('awake');
+}
+
 var switching = false;
 /* every world swap goes through here, so two can never overlap and strand the
    curtain or the flag */
@@ -8712,6 +8737,8 @@ function bindUI() {
     this.title = App.pinned ? 'Let the bar fade again' : 'Keep this bar on screen';
     wake();
   });
+
+  document.getElementById('bClose').addEventListener('click', hideHud);
 
   document.getElementById('bTools').addEventListener('click', function () {
     App.showTools = !App.showTools;
