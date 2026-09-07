@@ -4918,7 +4918,6 @@ function buildLandmark(scene, P, R, U, H) {
      landmark at all. The bare view has no frame, so it sees a little wider. */
   var lim = visibleHalfAngle(P) * (App.bare ? 1.05 : 0.80);
   var side = R.f() < 0.5 ? -1 : 1;
-  var a = side * R.range(lim * 0.22, lim);
   /* How far off it can stand and still be read. Fog sets one limit: past it
      the landmark is the colour of the air. Its own height sets the other: a
      thing too small to make out is not a landmark either. Neither limit was
@@ -4927,8 +4926,23 @@ function buildLandmark(scene, P, R, U, H) {
   var byFog = 1.02 / Math.max(P.weather.fogD, 0.0001);
   if (byFog < 150) { App.landmark = null; return; }
   var far = Math.min(560, byFog, (L.scale[0] + L.scale[1]) * 0.5 / 0.045);
-  var dist = R.range(Math.min(190, far * 0.78), far);
-  var x = Math.sin(a) * dist, z = -Math.cos(a) * dist;
+  var near = Math.min(190, far * 0.78);
+  /* Only a jetty belongs in the water. Nothing else was checked, so a cabin
+     on a lakefront could be set down on the lake bed and left standing in it.
+     Look for dry ground, trying either side of the view, and rather than put
+     a building under water, have none. */
+  var wet = function (px, pz) {
+    return P.waterY != null && kind !== 'jetty' && H(px, pz) < P.waterY + 0.6;
+  };
+  var a, dist, x, z;
+  for (var att = 0; att < 14; att++) {
+    a = side * R.range(lim * 0.22, lim);
+    dist = R.range(near, far);
+    x = Math.sin(a) * dist; z = -Math.cos(a) * dist;
+    if (!wet(x, z)) break;
+    side = -side;
+  }
+  if (wet(x, z)) { App.landmark = null; return; }
   var y = H(x, z);
   if (kind === 'jetty' && P.waterY != null) y = P.waterY - 0.4;
   var sz = R.range(L.scale[0], L.scale[1]);
