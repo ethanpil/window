@@ -620,8 +620,7 @@ var BIOMES = {
     label: 'cut hayfield', w: 9, terrain: 'rolling', palettes: STUBBLE_PALETTES,
     cover: 40000, coverH: [0.10, 0.20], coverChance: 1, coverVar: [0.85, 1.05], flowers: false,
     rows: true, flatLand: true,
-    props: [{ kind: 'bale', count: [10, 34], size: [1.3, 1.9], r: [9, 220] },
-            { kind: 'broadleaf', count: [2, 10], size: [6, 13], r: [60, 260] },
+    props: [{ kind: 'broadleaf', count: [2, 10], size: [6, 13], r: [60, 260] },
             { kind: 'hedge', count: [8, 26], size: [1.4, 2.4], r: [70, 240] }],
     haze: [1.05, 1.01, 0.95],
     weather: { clear: 32, fair: 28, breezy: 12, overcast: 10, mist: 8, drizzle: 6, rainstorm: 4 }
@@ -5333,81 +5332,6 @@ function buildBlocks(scene, P, R, U, H) {
   }
 }
 
-/* Round bales, wrapped or bare, sitting where the baler dropped them. */
-function baleGeo(R, upright) {
-  /* A round bale is about as wide as it is tall — roughly a cube's worth of
-     hay rolled up. It was two and a half times too long, which is why it read
-     as a pipe. The winding runs around the drum, so the stripe coordinate is
-     the position along the axis, not the way round it. */
-  var B = { pos: [], nor: [], idx: [], rib: [] };
-  var seg = 20, hl = R.range(0.46, 0.58), r = 0.5;
-  var ax = function (t) { return upright ? [0, 0.5 + t * 2 * hl - hl, 0] : [t * 2 * hl - hl, 0.5, 0]; };
-  /* both frames turn the same way about their own axis, or one of the two
-     orientations builds its drum inside out */
-  var rad = function (a) { return upright ? [Math.cos(a) * r, 0, Math.sin(a) * r] : [0, Math.cos(a) * r, -Math.sin(a) * r]; };
-  var i, k;
-  /* the drum */
-  for (i = 0; i <= seg; i++) {
-    var a = (i / seg) * 6.2832;
-    var rv = rad(a);
-    for (k = 0; k < 2; k++) {
-      var c = ax(k);
-      B.pos.push(c[0] + rv[0], c[1] + rv[1], c[2] + rv[2]);
-      B.nor.push(rv[0] / r, upright ? 0 : rv[1] / r, rv[2] / r);
-      B.rib.push(k);                       /* along the axis: rings around the drum */
-    }
-  }
-  for (i = 0; i < seg; i++) { var o = i * 2; B.idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2); }
-  /* the two flat faces, where the hay shows as a spiral */
-  for (var e = 0; e <= 1; e++) {
-    var c0 = B.pos.length / 3, cc = ax(e);
-    var n = upright ? [0, e ? 1 : -1, 0] : [e ? 1 : -1, 0, 0];
-    B.pos.push(cc[0], cc[1], cc[2]); B.nor.push(n[0], n[1], n[2]); B.rib.push(0);
-    for (i = 0; i <= seg; i++) {
-      var a2 = (i / seg) * 6.2832, rv2 = rad(a2);
-      B.pos.push(cc[0] + rv2[0], cc[1] + rv2[1], cc[2] + rv2[2]);
-      B.nor.push(n[0], n[1], n[2]);
-      B.rib.push(1);                        /* the face reads as one band */
-    }
-    for (i = 0; i < seg; i++) {
-      if (e) B.idx.push(c0, c0 + 2 + i, c0 + 1 + i);
-      else B.idx.push(c0, c0 + 1 + i, c0 + 2 + i);
-    }
-  }
-  var geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(B.pos, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(B.nor, 3));
-  geo.setAttribute('rib', new THREE.Float32BufferAttribute(B.rib, 1));
-  geo.setIndex(B.idx);
-  return geo;
-}
-
-function buildBales(scene, P, R, U, H, spec) {
-  var wrapped = R.f() < 0.35;
-  var upright = R.f() < 0.25;
-  var col = wrapped ? R.pick(['#e8e6e0', '#d9e2d6', '#2e2e30']) : R.pick(['#c9ae62', '#d6bd77', '#bda055']);
-  /* eight to fourteen turns of net around the drum, and a straw grain */
-  var mat = solidMat(U, col, { rib: wrapped ? 0.5 : 1, ribN: R.range(8, 14), grain: wrapped ? 0 : 1, spines: 0,
-                               barkN: 34, barkPlate: 2.5, body2: col });
-  var tpl = baleGeo(R, upright);
-  /* the baler works in lines, so bales fall roughly along them */
-  var lineA = R.range(0, 3.14), lineGap = R.range(24, 44);
-  var items = [], guard = 0;
-  while (items.length < spec.count && guard < spec.count * 60) {
-    guard++;
-    var a = R.range(-1.15, 1.15), rr = spec.r[0] + Math.pow(R.f(), 1.2) * (spec.r[1] - spec.r[0]);
-    var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
-    var perp = x * Math.cos(lineA) + z * Math.sin(lineA);
-    var snap = Math.round(perp / lineGap) * lineGap + R.gauss() * 2.2;
-    x += (snap - perp) * Math.cos(lineA); z += (snap - perp) * Math.sin(lineA);
-    if (!plantable(P, H, x, z)) continue;
-    var sz = R.range(spec.size[0], spec.size[1]);
-    items.push([x, H(x, z), z, sz, lineA + R.range(-0.25, 0.25), 1, 1]);
-    App._shadows.push([x, H(x, z), z, sz * 0.55, 0.85, sz]);
-  }
-  if (items.length) instanceSolid(scene, tpl, items, mat);
-}
-
 /* The water, laid on the same profile the rock was cut from, so it runs down
    the mountainside rather than hanging in front of it. One continuous ribbon:
    it free-falls down the pitches and spreads over the benches. */
@@ -6587,7 +6511,6 @@ function buildProps(scene, P, R, U, H) {
     if (spec.kind === 'city') { buildCity(scene, P, R, U, H); continue; }
     if (spec.kind === 'blocks') { buildBlocks(scene, P, R, U, H); continue; }
     if (spec.kind === 'bridge') { buildBridge(scene, P, R, U, H); continue; }
-    if (spec.kind === 'bale') { buildBales(scene, P, R, U, H, spec); continue; }
     if (spec.kind === 'rock') { buildRocks(scene, P, R, U, H, spec); continue; }
     var items = [];
     var guard = 0;
