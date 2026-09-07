@@ -2860,13 +2860,28 @@ function buildSky(scene, P, R, U) {
       '  sky += uSunCol * (pow(sd, 220.0) * 0.55 + pow(sd, 12.0) * 0.16 + pow(sd, 3.0) * 0.10 * (1.2 - h) + disk * 1.5) * uSunVis;',
       '  sky = mix(sky, uHorizon * 1.04, smoothstep(0.30, 0.0, d.y) * 0.45);',
       '  if (uNight > 0.01) {',
-      /* stars live in a coarse 3D lattice so they hold still as the view drifts */
-      '    vec3 sc = floor(d * 260.0);',
-      '    float h = starHash(sc);',
-      '    float mag = smoothstep(0.9958, 1.0, h);',
-      '    float twinkle = 0.65 + 0.35 * sin(uTime * (1.0 + h * 3.0) + h * 40.0);',
+      /* Stars live in a coarse lattice so they hold still as the view drifts.
+         The hash that decides whether a cell holds a star at all lands in a
+         sliver just below 1.0 for every star that exists, so taking the
+         twinkle from that same number gave the whole sky one rate to within
+         a third of a per cent and one phase to within ten degrees: every
+         star flashed at once. Rate, phase, brightness and size each get
+         their own draw now, and a star is a round point of its own size
+         rather than a whole lattice cell. */
+      '    vec3 sp = d * 260.0;',
+      '    vec3 sc = floor(sp);',
+      '    float hStar = starHash(sc);',
+      '    float hSize = starHash(sc + 31.7);',
+      '    float hRate = starHash(sc + 57.3);',
+      '    float hPhase = starHash(sc + 91.1);',
+      /* a few bright ones and many faint, rather than all alike */
+      '    float mag = smoothstep(0.9958, 1.0, hStar) * (0.30 + 0.70 * hSize * hSize);',
+      '    vec3 jit = 0.28 + 0.44 * vec3(starHash(sc + 3.1), starHash(sc + 11.7), starHash(sc + 23.9));',
+      '    float rad = 0.26 + 0.40 * hSize;',
+      '    float shape = 1.0 - smoothstep(rad * 0.30, rad, length(sp - sc - jit));',
+      '    float twinkle = 0.58 + 0.42 * sin(uTime * (0.5 + 3.6 * hRate) + hPhase * 62.83);',
       '    vec3 tint = mix(vec3(0.75, 0.83, 1.0), vec3(1.0, 0.92, 0.78), starHash(sc + 7.0));',
-      '    sky += tint * mag * twinkle * uNight * smoothstep(-0.02, 0.16, d.y) * 1.5;',
+      '    sky += tint * mag * shape * twinkle * uNight * smoothstep(-0.02, 0.16, d.y) * 2.6;',
       /* the moon, with a terminator so it shows a phase */
       '    float md = dot(d, normalize(uMoonDir));',
       '    float mAng = acos(clamp(md, -1.0, 1.0));',
