@@ -5273,17 +5273,33 @@ function buildCascadeFall(scene, P, R, U, H) {
   for (var q = 1; q < pts.length; q++)
     total += Math.hypot(pts[q].z - pts[q - 1].z, pts[q].y - pts[q - 1].y);
 
-  var pos = [], uv = [], idx = [], run = 0;
+  /* How far the sheet stands off the rock differed between a pitch and a
+     bench, and it switched the moment one became the other. The step forward
+     is 1m while the water only advances about 1m a point, so at every join
+     the sheet folded back toward the hill and out again: the fall came down
+     the mountain in a zigzag. Blend the two across the join instead. */
+  for (var m2 = 0; m2 < pts.length; m2++) {
+    var acc = 0, cnt = 0;
+    for (var d2 = -4; d2 <= 4; d2++) {
+      var j2 = m2 + d2;
+      if (j2 < 0 || j2 >= pts.length) continue;
+      acc += pts[j2].drop ? 1 : 0; cnt++;
+    }
+    pts[m2].dropF = acc / cnt;
+  }
+  var pos = [], uv = [], idx = [], run = 0, lastZ = -1e9;
   for (var m = 0; m < pts.length; m++) {
     var pt = pts[m];
     if (m > 0) run += Math.hypot(pt.z - pts[m - 1].z, pt.y - pts[m - 1].y);
-    if (m > 0 && pt.z <= pts[m - 1].z) pt.z = pts[m - 1].z + 0.2;   /* always run toward the window */
+    if (m > 0 && pt.z <= pts[m - 1].z) pt.z = pts[m - 1].z + 0.2;
     /* sit just clear of the rock: out of the gully floor and toward the viewer */
-    var lift = pt.drop ? 0.9 : 0.35;
-    var out = pt.drop ? 1.5 : 0.5;
+    var lift = 0.35 + 0.55 * pt.dropF;
+    var out = 0.5 + 1.0 * pt.dropF;
     /* each edge rides the rock beneath it, so the sheet leans with the gully
        and never cuts into its walls */
     var zz2 = pt.z + out;
+    if (zz2 <= lastZ) zz2 = lastZ + 0.05;      /* always run toward the window */
+    lastZ = zz2;
     var yL = Math.min(Math.max(pt.y, H(fx - pt.w, zz2) + lift * 0.5), H(fx - pt.w, zz2) + lift + 1.6);
     var yR = Math.min(Math.max(pt.y, H(fx + pt.w, zz2) + lift * 0.5), H(fx + pt.w, zz2) + lift + 1.6);
     pos.push(fx - pt.w, yL, zz2);
