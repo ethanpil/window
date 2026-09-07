@@ -744,14 +744,6 @@ var BIOMES = {
     haze: [1.02, 1.01, 1.0],
     weather: { clear: 46, fair: 26, breezy: 10, mist: 10, overcast: 8 }
   },
-  bamboo: {
-    label: 'bamboo grove', w: 8, terrain: 'rolling', palettes: GRASS_PALETTES,
-    cover: 24000, coverH: [0.18, 0.4], coverChance: 0.9, coverVar: [0.5, 1.0], flowers: false,
-    props: [{ kind: 'bamboo', count: [220, 620], size: [5, 11], r: [5, 70] },
-            { kind: 'bambooleaf', count: [60, 160], size: [3, 7], r: [8, 70], lift: 0.75 }],
-    haze: [0.99, 1.01, 1.0],
-    weather: { clear: 18, fair: 22, overcast: 14, mist: 24, drizzle: 12, rainstorm: 10 }
-  },
   blossom: {
     label: 'orchard in blossom', w: 8, terrain: 'rolling', palettes: GRASS_PALETTES,
     cover: 34000, coverH: [0.2, 0.46], coverChance: 1, coverVar: [0.8, 1.1],
@@ -1106,7 +1098,7 @@ function buildParams(seedStr, nonce) {
   var PATHABLE = { meadow: 'foot', moor: 'foot', hayfield: 'track', farmland: 'tram', flowerfield: 'foot',
     lavender: 'tram', orchard: 'track', blossom: 'track', autumn: 'foot', savanna: 'track',
     desert: 'wash', canyon: 'wash', saltflat: 'track', tundra: 'foot', terraces: 'foot',
-    alpine: 'foot', bamboo: 'foot', oasis: 'track', river: 'foot', lakefront: 'foot' };
+    alpine: 'foot', oasis: 'track', river: 'foot', lakefront: 'foot' };
   /* Every layout draw also consumes an identity draw, which is what keeps a
      reshuffle from changing the scene. So the draws must not be conditional on
      a layout result: take them all, then decide whether to use them. */
@@ -1907,22 +1899,6 @@ function makePropTexture(kind, P, R, opts) {
     }
     g.fillStyle = '#e8c73a';
     for (var fl = 0; fl < 16; fl++) { var fa = -Math.PI * R.range(0.15, 0.85), fd = dome * R.range(0.85, 1.15); g.beginPath(); g.arc(S / 2 + Math.cos(fa) * fd, S - Math.sin(fa) * fd * 0.7, S * 0.012, 0, 6.283); g.fill(); }
-  } else if (kind === 'bambooleaf') {
-    var lc = new THREE.Color(R.pick(['#5e8a3c', '#6d9945', '#4f7a35']));
-    g.lineCap = 'round';
-    for (var bl2 = 0; bl2 < 70; bl2++) {
-      var bx2 = S / 2 + (R.f() - 0.5) * S * 0.5;
-      var by2 = S * R.range(0.05, 0.75);
-      var bang2 = R.range(0.4, 2.7);
-      var blen = S * R.range(0.06, 0.15);
-      g.strokeStyle = rgb(lc.clone().lerp(new THREE.Color('#b6d18a'), R.f() * 0.6));
-      g.lineWidth = R.range(2, 4.5);
-      g.beginPath(); g.moveTo(bx2, by2);
-      g.quadraticCurveTo(bx2 + Math.cos(bang2) * blen * 0.6, by2 + Math.sin(bang2) * blen * 0.4,
-                         bx2 + Math.cos(bang2) * blen, by2 + Math.sin(bang2) * blen + blen * 0.3);
-      g.stroke();
-    }
-
   } else if (kind === 'acacia') {
     var ac = new THREE.Color(R.pick(['#4e5a2e', '#586633', '#46512a'])).multiplyScalar(P.treeTint);
     var alite = ac.clone().lerp(new THREE.Color('#b3ba78'), 0.5);
@@ -3889,46 +3865,6 @@ function instanceSolid(scene, tpl, items, mat) {
   return m;
 }
 
-/* ---------- bamboo: tall jointed culms ---------- */
-function bambooTemplate(R) {
-  var B = { pos: [], nor: [], idx: [], rib: [] };
-  var r = R.range(0.012, 0.022);
-  var lean = R.range(-0.05, 0.05);
-  var path = [], radii = [];
-  for (var i = 0; i <= 7; i++) {
-    var t = i / 7;
-    path.push([lean * t * t, t, lean * 0.4 * t * t]);
-    radii.push(r * (1 - t * 0.35));
-  }
-  pushTube(B, path, radii, 7);
-  var geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(B.pos, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(B.nor, 3));
-  geo.setAttribute('rib', new THREE.Float32BufferAttribute(B.rib, 1));
-  geo.setIndex(B.idx);
-  return geo;
-}
-
-function buildBamboo(scene, P, R, U, H, spec) {
-  var mat = solidMat(U, R.pick(['#6f8c3a', '#7b9440', '#5f7f36']), { rib: 0, nodes: 1 });
-  for (var t = 0; t < 3; t++) {
-    var tpl = bambooTemplate(R);
-    var items = [], guard = 0;
-    var want = Math.ceil(spec.count / 3);
-    while (items.length < want && guard < want * 40) {
-      guard++;
-      var a = R.range(-1.1, 1.1);
-      var rr = spec.r[0] + Math.pow(R.f(), 1.2) * (spec.r[1] - spec.r[0]);
-      var x = Math.sin(a) * rr + R.gauss() * 0.8, z = -Math.cos(a) * rr + R.gauss() * 0.8;
-      if (!plantable(P, H, x, z)) continue;
-      var bsz = R.range(spec.size[0], spec.size[1]);
-      items.push([x, H(x, z) - 0.1, z, bsz, R.range(0, 6.283), 1, 1]);
-      App._shadows.push([x, H(x, z), z, bsz * 0.05, 0.7, bsz]);
-    }
-    if (items.length) instanceSolid(scene, tpl, items, mat);
-  }
-}
-
 /* ---------- drystone walls along field edges ---------- */
 function buildWalls(scene, P, R, U, H, spec) {
   var box = new THREE.BoxGeometry(1, 1, 1);
@@ -4699,8 +4635,8 @@ var LANDMARKS = {
   tower:      { biomes: ['moor', 'alpine', 'terraces', 'autumn', 'tundra', 'cliffcoast'], scale: [10, 18], body: '#8d867a', trim: '#6d675c' },
   barn:       { biomes: ['farmland', 'orchard', 'blossom', 'meadow', 'savanna', 'hayfield'], scale: [7, 11], body: '#7a3f31', trim: '#e8e2d4', smoke: true },
   silo:       { biomes: ['farmland', 'orchard'], scale: [9, 14], body: '#b9b3a4', trim: '#8a857a' },
-  cabin:      { biomes: ['alpine', 'lakefront', 'river', 'autumn', 'tundra', 'bamboo', 'marsh', 'oasis'], scale: [5, 8], body: '#6b543c', trim: '#4a3a2a', smoke: true },
-  pagoda:     { biomes: ['bamboo', 'terraces'], scale: [8, 13], body: '#7d4a3a', trim: '#3f3630' },
+  cabin:      { biomes: ['alpine', 'lakefront', 'river', 'autumn', 'tundra', 'marsh', 'oasis'], scale: [5, 8], body: '#6b543c', trim: '#4a3a2a', smoke: true },
+  pagoda:     { biomes: ['terraces'], scale: [8, 13], body: '#7d4a3a', trim: '#3f3630' },
   watertank:  { biomes: ['desert', 'saltflat', 'savanna', 'urban', 'farmland', 'hayfield'], scale: [8, 12], body: '#9aa0a2', trim: '#6f7476' },
   jetty:      { biomes: ['lakefront', 'coast', 'marsh', 'river'], scale: [6, 9], body: '#6a5a45', trim: '#4e4235' }
 };
@@ -5573,7 +5509,7 @@ var HERDS = {
   sheep:  { biomes: ['moor', 'meadow', 'hayfield', 'alpine', 'terraces', 'tundra'], n: [8, 34], size: [0.75, 1.0], col: '#ddd8cc', dark: '#3a352e', graze: 0.75, speed: 0.05 },
   cattle: { biomes: ['meadow', 'farmland', 'hayfield', 'river', 'lakefront'], n: [5, 16], size: [1.5, 1.9], col: '#8a6b4a', dark: '#2e2822', graze: 0.7, speed: 0.04 },
   goat:   { biomes: ['canyon', 'alpine', 'terraces', 'moor', 'oasis'], n: [4, 12], size: [0.7, 0.95], col: '#a8967c', dark: '#4a4036', graze: 0.6, speed: 0.07 },
-  deer:   { biomes: ['autumn', 'orchard', 'blossom', 'bamboo', 'cascade', 'river', 'meadow'], n: [3, 8], size: [1.2, 1.5], col: '#9c7852', dark: '#4a3826', graze: 0.55, speed: 0.08 },
+  deer:   { biomes: ['autumn', 'orchard', 'blossom', 'cascade', 'river', 'meadow'], n: [3, 8], size: [1.2, 1.5], col: '#9c7852', dark: '#4a3826', graze: 0.55, speed: 0.08 },
   camel:  { biomes: ['oasis', 'desert', 'saltflat'], n: [3, 9], size: [1.9, 2.3], col: '#bda078', dark: '#6b5940', graze: 0.5, speed: 0.045 }
 };
 function makeHerdTexture(kind, H) {
@@ -6395,7 +6331,6 @@ function buildProps(scene, P, R, U, H) {
     var spec = specs[si];
     if (!spec.count) continue;
     if (spec.kind === 'cactus') { buildCacti(scene, P, R, U, H, spec); continue; }
-    if (spec.kind === 'bamboo') { buildBamboo(scene, P, R, U, H, spec); continue; }
     if (spec.kind === 'wall') { buildWalls(scene, P, R, U, H, spec); continue; }
     if (spec.kind === 'city') { buildCity(scene, P, R, U, H); continue; }
     if (spec.kind === 'blocks') { buildBlocks(scene, P, R, U, H); continue; }
@@ -7774,7 +7709,7 @@ var Sound = {
     };
     var bedKind = { alpine: 'open', fjord: 'open', moor: 'open', cliffcoast: 'open', savanna: 'open',
       coast: 'shore', meadow: 'field', farmland: 'field', lavender: 'field', flowerfield: 'field',
-      autumn: 'forest', orchard: 'forest', blossom: 'forest', bamboo: 'forest',
+      autumn: 'forest', orchard: 'forest', blossom: 'forest',
       river: 'water', lakefront: 'water', marsh: 'water', terraces: 'water',
       desert: 'dry', saltflat: 'dry', tundra: 'cold', urban: 'town',
       penthouse: 'town', bridge: 'water', cascade: 'water', canyon: 'open',
@@ -7790,10 +7725,9 @@ var Sound = {
       corner: [[820, 6.0, 0.05, 'pink'], [1400, 7.0, 0.03, 'pink']],            /* whistle past an edge */
       dry:    [[1100, 1.4, 0.05, 'white'], [2300, 2.0, 0.03, 'white']],         /* sand and grit */
       water:  [[240, 2.6, 0.08, 'brown'], [700, 3.5, 0.05, 'pink']],
-      bamboo: [[3400, 3.0, 0.045, 'white'], [5200, 4.0, 0.025, 'white']],
       leaves: [[1900, 1.4, 0.06, 'white'], [3300, 2.2, 0.035, 'white']]
     };
-    var wv = { alpine: 'pines', fjord: 'pines', lakefront: 'pines', bamboo: 'bamboo', urban: 'corner', cliffcoast: 'corner',
+    var wv = { alpine: 'pines', fjord: 'pines', lakefront: 'pines', urban: 'corner', cliffcoast: 'corner',
       desert: 'dry', saltflat: 'dry', tundra: 'dry', coast: 'water', river: 'water', marsh: 'water',
       autumn: 'leaves', orchard: 'leaves', blossom: 'leaves', savanna: 'grass',
       penthouse: 'corner', bridge: 'water', cascade: 'water', canyon: 'corner',
@@ -7834,8 +7768,6 @@ var Sound = {
       this.layer({ type: 'bandpass', freq: 480, Q: 2.2, gain: 0.05, pan: -0.3, wet: 0.5, drift: { rate: 0.052, depth: 70 } });
     } else if (B === 'desert' || B === 'saltflat') {
       this.layer({ type: 'highpass', freq: 1100, Q: 0.5, gain: 0.035, pan: 0.2, wet: 0.25 });
-    } else if (B === 'bamboo') {
-      this.layer({ type: 'bandpass', freq: 3400, Q: 0.9, gain: 0.045, pan: 0.15, wet: 0.45 });
     }
 
     /* what a place sounds like when the birds are quiet */
@@ -7878,7 +7810,7 @@ var Sound = {
 
     var songful = { desert: 'hawk', savanna: 'hawk', tundra: 'hawk', moor: 'hawk', saltflat: 'hawk',
       meadow: 'fluty', farmland: 'fluty', orchard: 'fluty', blossom: 'trill', lavender: 'trill',
-      flowerfield: 'trill', savanna: 'trill', autumn: 'coo', bamboo: 'coo', alpine: 'trill',
+      flowerfield: 'trill', savanna: 'trill', autumn: 'coo', alpine: 'trill',
       river: 'fluty', lakefront: 'coo',
       coast: 'gull', cliffcoast: 'gull', marsh: 'gull',
       bridge: 'fluty', cascade: 'trill', canyon: 'hawk', oasis: 'coo', hayfield: 'fluty' };
@@ -7937,7 +7869,7 @@ var Sound = {
           } else self.burst({ src: 'brown', type: 'lowpass', freq: 260, Q: 1.5, gain: 0.14, dur: 0.25, at: [side * 40, 4, -90], ref: 30, wet: 0.7 });
         } else if ((B === 'tundra' || W.snow > 0) && r < 0.5) {
           self.burst({ src: 'white', freq: 5200, Q: 8, gain: 0.03, dur: 0.02, at: [side * 6, 0, -8], ref: 3, wet: 0.2 });
-        } else if (/autumn|orchard|blossom|bamboo|meadow|farmland|lakefront|alpine/.test(B) && r < 0.55) {
+        } else if (/autumn|orchard|blossom|meadow|farmland|lakefront|alpine/.test(B) && r < 0.55) {
           /* a twig, or a stir of leaves */
           if (Math.random() < 0.4) self.burst({ src: 'brown', freq: 1400, Q: 3, gain: 0.08, dur: 0.05, at: [side * 12, 0, -16], ref: 5, wet: 0.35 });
           else self.burst({ src: 'white', freq: 2600, sweep: 1900, Q: 0.8, gain: 0.05, dur: 0.6, attack: 0.15, at: [side * 14, 3, -20], ref: 7, wet: 0.45 });
