@@ -2576,8 +2576,17 @@ function makeHeightField(P) {
     var band0 = Math.floor(runAt(0, 0) / stepW);
     return function (x, z) {
       var d = Math.sqrt(x * x + z * z);
-      var band = Math.floor(runAt(x, z) / stepW);
-      var h = (band - band0) * stepH;
+      var run = runAt(x, z) / stepW;
+      var band = Math.floor(run);
+      /* The ground mesh warps from about a metre across at the window to tens
+         of metres at its edge, and passes the width of one tread at around
+         sixty-five metres out. Past that the staircase falls between the grid
+         points: neighbouring vertices land on treads two or three apart and
+         the hillside breaks into angular blocks with nothing between them.
+         Let the steps melt into the slope they approximate over the range
+         where the mesh stops being able to carry them. */
+      var melt = smoothstep(38, 115, d);
+      var h = ((band - band0) * (1 - melt) + (run - band0 - 0.5) * melt) * stepH;
       h += fbm2(x * 0.06, z * 0.06, s, 2) * 0.07;          /* the paddy surface is not glass */
       h += Math.pow(ridged(x * 0.0032, z * 0.0032, s + 29, 3), 1.4) * far * 1.2 * smoothstep(320, 900, d);
       return h;
