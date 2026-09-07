@@ -5324,6 +5324,12 @@ function buildCascadeFall(scene, P, R, U, H) {
       uLen: { value: total }
     },
     extensions: { derivatives: true },
+    /* The eye looks along the slope, not across it, so the rock kept coming up
+       in front of the sheet even though the water rides two metres above it.
+       That cut the fall into horizontal bands. Bias the water toward the eye
+       in depth rather than in space: it still goes behind anything properly in
+       front of it, such as the trees on the near bank. */
+    polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -16,
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
     vertexShader: [
       'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
