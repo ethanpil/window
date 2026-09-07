@@ -3844,7 +3844,7 @@ function solidMat(U, colour, opts) {
          grid of horizontal bands, which read as a painted road. These ridges
          wander as they climb, split into plates, and carry a fine grain. */
       '    float wob = sin(vUp * 8.0 + vSeed) * 0.020 + sin(vUp * 21.0 + vSeed * 2.3) * 0.008;',
-      '    float u = vRib + wob;',
+      '    float u = vRib + wob + vSeed * 0.159;',
       '    float kB = bandLimit(u, uBarkN);',
       '    float fis = abs(fract(u * uBarkN) - 0.5) * 2.0;',
       '    c *= 1.0 - 0.40 * smoothstep(0.45, 1.0, fis) * kB;',
@@ -4315,21 +4315,31 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
   /* pines are deeply fissured, olives finely so, a broadleaf in between */
   var barkN = kind === 'pine' ? R.range(11, 15) : (kind === 'olive' ? R.range(22, 30) : R.range(15, 22));
   var mat = solidMat(U, bark, { rib: 0, grain: 1, barkN: barkN, barkPlate: kind === 'pine' ? 3.5 : 6.0, aoH: 0.08 });
-  var tpl = trunkTemplate(R, kind);
-  var solids = [], rots = [];
+  /* One trunk served every tree in the world, so a wood was the same tree
+     stamped out and turned: the same lean, the same curve, the same ratio.
+     Grow a few and deal them out. */
+  var forms = Math.min(items.length, kind === 'pine' ? 3 : 4), f;
+  var tpls = [];
+  for (f = 0; f < forms; f++) tpls.push(trunkTemplate(R, kind));
+  var solids = [], rots = [], form = [];
   for (var i = 0; i < items.length; i++) {
     var rot0 = R.range(0, 6.283);
     rots.push(rot0);
+    form.push(i % forms);
     solids.push([items[i][0], H(items[i][0], items[i][1]) - 0.05, items[i][1], items[i][2], rot0, 1, 1]);
   }
-  instanceSolid(scene, tpl, solids, mat);
+  for (f = 0; f < forms; f++) {
+    var part = [];
+    for (i = 0; i < items.length; i++) if (form[i] === f) part.push(solids[i]);
+    if (part.length) instanceSolid(scene, tpls[f], part, mat);
+  }
   /* the crown: a volume of leaf sprays. Each card knows how deep in the crown
      it sits: darker inside, lighter on top and on the sun side. */
   var cards = [];
   var sunRight = Math.sin(P.sunAz) > 0 ? 1 : -1;
-  var tips = tpl.userData.tips || [];
   for (var k = 0; k < items.length; k++) {
     var sz = items[k][2], rot = rots[k], cr = Math.cos(rot), sr = Math.sin(rot);
+    var tips = tpls[form[k]].userData.tips || [];
     var treePh = items[k][0] * 0.3 + items[k][1] * 0.2;
     var wide = kind === 'acacia' ? 1.7 : 1;
     if (kind === 'pine') {
