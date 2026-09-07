@@ -4283,7 +4283,7 @@ function trunkTemplate(R, kind) {
     tips.push([f2.tipX, fh, f2.tipZ]);
   }
 
-  var arms = kind === 'pine' ? 0 : R.int(6, 9);
+  var arms = kind === 'pine' ? 0 : R.int(6, 9), sp;
   for (var a = 0; a < arms; a++) {
     var th = (a / arms) * 6.283 + R.range(-0.4, 0.4);
     var y0 = top * R.range(0.55, 0.95), reach = R.range(0.18, 0.32), rise = R.range(0.12, 0.30);
@@ -4296,12 +4296,18 @@ function trunkTemplate(R, kind) {
     pushTube(B, br.path, br.radii, 8);
     tips.push([ex, y0 + rise, ez]);
     tips.push([(ax + ex) * 0.62, y0 + rise * 0.55, (az + ez) * 0.62]);
+    /* Sprays along the limb as well as at its end. Leaves only at the tips
+       left every branch bare along its length and the middle of the crown
+       hollow, so the tree read as a frame with tufts hung on it. The fourth
+       number marks a spray inside the crown, which needs fewer cards. */
+    for (sp = 2; sp <= 4; sp++) tips.push([br.path[sp][0], br.path[sp][1], br.path[sp][2], 1]);
     var th2 = th + R.range(-1.1, 1.1), r2 = reach * R.range(0.35, 0.55);
     var fx = ex + Math.cos(th2) * r2, fz = ez + Math.sin(th2) * r2, fy = y0 + rise + R.range(0.04, 0.14);
     var br2 = limbPath([ex * 0.85 + ax * 0.15, y0 + rise * 0.8, ez * 0.85 + az * 0.15], [fx, fy, fz],
                        [(ex + fx) * 0.5, y0 + rise * 0.9, (ez + fz) * 0.5], baseR * 0.24, 4);
     pushTube(B, br2.path, br2.radii, 6);
     tips.push([fx, fy, fz]);
+    for (sp = 2; sp <= 3; sp++) tips.push([br2.path[sp][0], br2.path[sp][1], br2.path[sp][2], 1]);
   }
   var geo = finishGeo(B);
   geo.userData.tips = tips;
@@ -4358,7 +4364,7 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
         var tp = tips[ti];
         var lx = tp[0] * sz, ly = tp[1] * sz, lz = tp[2] * sz;
         var wx = (lx * cr - lz * sr) * wide, wz = (lx * sr + lz * cr) * wide;   /* the tree's own rotation */
-        var reps = ti === 0 ? 4 : (R.f() < 0.5 ? 2 : 3);
+        var reps = ti === 0 ? 4 : (tp[3] ? 1 : (R.f() < 0.5 ? 2 : 3));
         for (var q2 = 0; q2 < reps; q2++) {
           var cs2 = sz * R.range(0.30, 0.44) * (kind === 'acacia' ? 0.8 : 1);
           var jx = R.range(-0.32, 0.32) * cs2 * 0.6, jy = R.range(-0.2, 0.4) * cs2 * 0.5, jz = R.range(-0.32, 0.32) * cs2 * 0.6;
