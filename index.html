@@ -4267,10 +4267,14 @@ function rockTemplate(R, kind) {
   var sx = kind === 'slab' ? R.range(1.3, 1.9) : R.range(0.8, 1.2);
   var sy = kind === 'slab' ? R.range(0.32, 0.5) : (kind === 'shard' ? R.range(1.4, 2.1) : R.range(0.62, 0.95));
   var sz = kind === 'slab' ? R.range(0.9, 1.5) : R.range(0.7, 1.15);
-  var rough = kind === 'boulder' ? 0.16 : (kind === 'block' ? 0.30 : 0.24);
+  var rough = kind === 'boulder' ? 0.22 : (kind === 'block' ? 0.34 : 0.28);
   for (var i = 0; i < pos.count; i++) {
     var x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-    var n = 1 + fbm2(x * 1.9 + seed, z * 1.9 + y * 1.3, seed, 3) * rough;
+    /* Two scales of displacement. The fine one roughens the surface; without
+       the coarse one the rock keeps the outline of the sphere it started as,
+       and scaling that by three numbers only makes it an egg. */
+    var n = 1 + fbm2(x * 1.9 + seed, z * 1.9 + y * 1.3, seed, 3) * rough
+              + fbm2(x * 0.8 + seed * 0.37, z * 0.8 + y * 0.55, seed + 61, 2) * rough * 0.9;
     /* blocks have a flat top; shards lean */
     var yy = y * n * sy;
     if (kind === 'block' && yy > sy * 0.55) yy = sy * 0.55 + (yy - sy * 0.55) * 0.25;
@@ -4294,6 +4298,13 @@ function buildRocks(scene, P, R, U, H, spec) {
   var per = Math.ceil(spec.count / kinds.length);
   for (var t = 0; t < kinds.length; t++) {
     var tpl = rockTemplate(R, kinds[t]), items = [], guard = 0;
+    /* The size in the biome spec was multiplying a template that is itself
+       anywhere from 0.7 to 3.9 units tall, so the same number meant a boulder
+       to one kind and a standing stone to another: a shard on the moor came
+       out nearly seven metres. Read the spec as the height the rock should
+       be, and hold even the big ones to something a person could climb. */
+    tpl.computeBoundingBox();
+    var tplH = Math.max(tpl.boundingBox.max.y - tpl.boundingBox.min.y, 0.01);
     while (items.length < per && guard < per * 40) {
       guard++;
       var a = R.range(-1.22, 1.22);
@@ -4301,8 +4312,9 @@ function buildRocks(scene, P, R, U, H, spec) {
       var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
       if (!plantable(P, H, x, z)) continue;
       /* mostly modest, now and then a boulder the size of a car */
-      var big = R.f() < 0.12;
-      var sz = R.range(spec.size[0], spec.size[1]) * 0.55 * (big ? R.range(2.2, 3.6) : 1);
+      var big = R.f() < 0.10;
+      var want = R.range(spec.size[0], spec.size[1]) * 0.62 * (big ? R.range(1.35, 1.8) : 1);
+      var sz = Math.min(want, 2.2) / tplH;
       var y = H(x, z) - sz * (kinds[t] === 'slab' ? 0.12 : 0.30);       /* bedded into the ground */
       items.push([x, y, z, sz, R.range(0, 6.283), R.range(0.8, 1.15), R.range(0.75, 1.25)]);
       App._shadows.push([x, H(x, z), z, sz * 0.9, 0.7, sz * 0.9]);
