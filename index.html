@@ -3729,7 +3729,8 @@ function solidMat(U, colour, opts) {
       uNodes: { value: opts.nodes || 0 },
       uGrain: { value: opts.grain || 0 },
       uSpin: { value: opts.spin || 0 },
-      uAoH: { value: opts.aoH == null ? 0.35 : opts.aoH }
+      uAoH: { value: opts.aoH == null ? 0.35 : opts.aoH },
+      uTwoTone: { value: opts.twoTone ? 1 : 0 }
     },
     vertexShader: [
       'attribute vec3 iPos; attribute vec4 iAttr; attribute float rib;',
@@ -3769,7 +3770,7 @@ function solidMat(U, colour, opts) {
     ].join('\n'),
     fragmentShader: [
       GLSL_TONE,
-      'uniform vec3 uSpine, uTipCol, uBody2, uLichen, uBody; uniform float uRib, uNodes, uGrain, uRibN, uSpines, uTipMix, uBarkN, uBarkPlate;',
+      'uniform vec3 uSpine, uTipCol, uBody2, uLichen, uBody; uniform float uRib, uNodes, uGrain, uRibN, uSpines, uTipMix, uBarkN, uBarkPlate, uTwoTone;',
       /* A computed pattern has no mip chain, so once its stripes are finer than
          a pixel it turns to moire. This measures how fast the pattern's own
          coordinate moves per pixel and fades the pattern out as it nears that
@@ -3787,6 +3788,9 @@ function solidMat(U, colour, opts) {
       '}',
       'void main(){',
       '  vec3 c = vCol;',
+      /* a roof, a cap, a set of tyres: parts marked as trim take the second
+         colour, keeping the light already worked out for them */
+      '  if (uTwoTone > 0.5) c *= mix(vec3(1.0), uBody2 / max(uBody, vec3(0.02)), step(0.5, vRib));',
       '  float rr = vRib * 6.2832 * uRibN;',
       '  float kRib = bandLimit(vRib, uRibN);',
       '  if (uRib > 0.01) c *= 1.0 + 0.16 * uRib * cos(rr) * kRib;',
@@ -4662,10 +4666,18 @@ function pushCone(B, cx, cy, cz, r, h, seg, invert) {
     B.idx.push(o, o + 1, o + 2);
   }
 }
-function pushCyl(B, cx, cy, cz, r0, r1, h, seg) {
+/* alongZ lays the cylinder on its side, running from cz to cz + h, which is
+   what a wheel needs. The sweep turns the other way in that case, or the
+   frame is left handed and the drum comes out inside out. */
+function pushCyl(B, cx, cy, cz, r0, r1, h, seg, alongZ) {
   var start = B.pos.length / 3, i;
   for (i = 0; i <= seg; i++) {
     var a = (i / seg) * 6.2832, ca = Math.cos(a), sa = Math.sin(a);
+    if (alongZ) {
+      B.pos.push(cx + ca * r0, cy - sa * r0, cz); B.nor.push(ca, -sa, 0); B.rib.push(i / seg);
+      B.pos.push(cx + ca * r1, cy - sa * r1, cz + h); B.nor.push(ca, -sa, 0); B.rib.push(i / seg);
+      continue;
+    }
     B.pos.push(cx + ca * r0, cy, cz + sa * r0); B.nor.push(ca, 0.1, sa); B.rib.push(i / seg);
     B.pos.push(cx + ca * r1, cy + h, cz + sa * r1); B.nor.push(ca, 0.1, sa); B.rib.push(i / seg);
   }
@@ -4710,6 +4722,10 @@ function windmillSailGeo() {
 
 function landmarkGeo(kind, R) {
   var B = { pos: [], nor: [], idx: [], rib: [] }, i;
+  /* Anything built inside mark() takes the trim colour instead of the body
+     one, which is what lets a roof sit on a wall of a different shade. */
+  var trims = [];
+  var mark = function (fn) { var a0 = B.rib.length; fn(); trims.push(a0, B.rib.length); };
   if (kind === 'lighthouse') {
     pushCyl(B, 0, 0, 0, 0.22, 0.13, 1.0, 16);
     pushCyl(B, 0, 1.0, 0, 0.17, 0.17, 0.10, 16);          /* gallery */
@@ -4763,6 +4779,11 @@ function landmarkGeo(kind, R) {
       pushBox(B, 0.18, 0.05, -i * 0.30, 0.02, 0.09, 0.02, 0);
     }
   }
+  /* pushCyl writes a stripe coordinate the landmarks do not use, so start
+     from body everywhere and paint the marked ranges as trim */
+  for (i = 0; i < B.rib.length; i++) B.rib[i] = 0;
+  for (i = 0; i < trims.length; i += 2)
+    for (var t2 = trims[i]; t2 < trims[i + 1]; t2++) B.rib[t2] = 1;
   return finishGeo(B);
 }
 
@@ -4798,7 +4819,7 @@ function buildLandmark(scene, P, R, U, H) {
   var y = H(x, z);
   if (kind === 'jetty' && P.waterY != null) y = P.waterY - 0.4;
   var sz = R.range(L.scale[0], L.scale[1]);
-  var mat = solidMat(U, L.body, { rib: 0, grain: 0, spines: 0, body2: L.trim });
+  var mat = solidMat(U, L.body, { rib: 0, grain: 0, spines: 0, body2: L.trim, twoTone: 1 });
   instanceSolid(scene, landmarkGeo(kind, R), [[x, y, z, sz, 0, 1, 1]], mat);
   App._shadows.push([x, y, z, sz * 0.30, 0.85, sz]);
   if (kind === 'windmill') {
