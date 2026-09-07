@@ -3525,15 +3525,25 @@ function pushTube(B, path, radii, seg, ribs) {
   var start = B.pos.length / 3, i, j;
   var rn = ribs ? ribs.n : 0, ra = ribs ? ribs.amp : 0;
   var ref = new THREE.Vector3(1, 0, 0);
-  var T = new THREE.Vector3(), N = new THREE.Vector3(), Bi = new THREE.Vector3();
+  var T = new THREE.Vector3(), N = new THREE.Vector3(), Bi = new THREE.Vector3(), prev = null;
   for (i = 0; i < path.length; i++) {
     var a = path[Math.max(i - 1, 0)], b = path[Math.min(i + 1, path.length - 1)];
     T.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
     if (T.lengthSq() < 1e-9) T.set(0, 1, 0);
     T.normalize();
-    ref.set(Math.abs(T.y) > 0.94 ? 1 : 0, Math.abs(T.y) > 0.94 ? 0 : 1, 0);
-    N.crossVectors(ref, T).normalize();
+    if (prev) {
+      /* Carry the frame along the path. Built afresh from a fixed axis it
+         swings through 140 degrees in one ring where a limb turns from level
+         to upright, which shears the tube apart at the elbow. */
+      N.copy(prev).addScaledVector(T, -prev.dot(T));
+      if (N.lengthSq() < 1e-10) { ref.set(Math.abs(T.y) > 0.94 ? 1 : 0, Math.abs(T.y) > 0.94 ? 0 : 1, 0); N.crossVectors(ref, T); }
+    } else {
+      ref.set(Math.abs(T.y) > 0.94 ? 1 : 0, Math.abs(T.y) > 0.94 ? 0 : 1, 0);
+      N.crossVectors(ref, T);
+    }
+    N.normalize();
     Bi.crossVectors(T, N).normalize();
+    prev = (prev || new THREE.Vector3()).copy(N);
     /* the ring closes on a repeated vertex, as pushCyl does, so the stripe
        coordinate can reach 1 instead of falling back to 0 across the last
        face and running the whole bark pattern backwards down one seam */
