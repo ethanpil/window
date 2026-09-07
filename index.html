@@ -3720,11 +3720,12 @@ function solidMat(U, colour, opts) {
       uLichen: { value: new THREE.Color(opts.lichen || '#8f9a3c') },
       uNodes: { value: opts.nodes || 0 },
       uGrain: { value: opts.grain || 0 },
-      uSpin: { value: opts.spin || 0 }
+      uSpin: { value: opts.spin || 0 },
+      uAoH: { value: opts.aoH == null ? 0.35 : opts.aoH }
     },
     vertexShader: [
       'attribute vec3 iPos; attribute vec4 iAttr; attribute float rib;',
-      'uniform float uTime, uFogDensity, uShadow, uSpin;',
+      'uniform float uTime, uFogDensity, uShadow, uSpin, uAoH;',
       'uniform vec3 uSunDir, uSunCol, uAmbCol, uBody, uFogCol;',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
       GLSL_COMMON,
@@ -3744,7 +3745,7 @@ function solidMat(U, colour, opts) {
       '  vec3 n = normalize(vec3(nl.x * c - nl.z * s, nl.y, nl.x * s + nl.z * c));',
       '  float diff = max(dot(n, normalize(uSunDir)), 0.0);',
       '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.30, 1.0, baked(wp.xz));',
-      '  float ao = uSpin != 0.0 ? 1.0 : mix(0.55, 1.0, smoothstep(0.0, 0.35, position.y));',
+      '  float ao = uSpin != 0.0 ? 1.0 : mix(0.55, 1.0, smoothstep(0.0, uAoH, position.y));',
       /* Ambient light carried no direction, so anything the sun did not reach
          came out evenly lit: a trunk read as a flat plank. The sky is
          brightest toward the sun, so lean the ambient that way. Averaged over
@@ -4248,11 +4249,11 @@ function trunkTemplate(R, kind) {
             : (kind === 'olive' ? (R.f() < 0.5 ? 'sinuous' : 'buttressed') : R.pick(TRUNK_SHAPES));
   var top = kind === 'pine' ? R.range(0.76, 0.88) : R.range(0.46, 0.66);
   var baseR = kind === 'pine' ? R.range(0.026, 0.036) : R.range(0.034, 0.052);
-  var lean = 0, lean2 = 0, curve = 0, flare = 0.9, flareK = 9.0, taper = 0.35, sides = 20;
+  var lean = 0, lean2 = 0, curve = 0, flare = 0.9, flareK = 6.0, taper = 0.35, sides = 20;
 
   if (shape === 'leaning')     { lean = R.range(0.10, 0.22) * (R.f() < 0.5 ? -1 : 1); lean2 = R.range(-0.08, 0.08); }
   else if (shape === 'sinuous'){ curve = R.range(0.05, 0.11); lean = R.range(-0.07, 0.07); }
-  else if (shape === 'buttressed') { flare = R.range(1.6, 2.6); flareK = R.range(5.5, 8.0); baseR *= 1.15; taper = 0.45; sides = 22; }
+  else if (shape === 'buttressed') { flare = R.range(0.9, 1.5); flareK = R.range(3.2, 4.6); baseR *= 1.15; taper = 0.45; sides = 22; }
   else                          { lean = R.range(-0.05, 0.05); lean2 = R.range(-0.05, 0.05); }
 
   var ph = R.range(0, 6.283), ph2 = R.range(0, 6.283);
@@ -4313,7 +4314,7 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
   var bark = kind === 'pine' ? '#4a3a2c' : (kind === 'olive' ? '#6b6152' : (kind === 'palm' ? '#6f5b3f' : '#5a4636'));
   /* pines are deeply fissured, olives finely so, a broadleaf in between */
   var barkN = kind === 'pine' ? R.range(11, 15) : (kind === 'olive' ? R.range(22, 30) : R.range(15, 22));
-  var mat = solidMat(U, bark, { rib: 0, grain: 1, barkN: barkN, barkPlate: kind === 'pine' ? 3.5 : 6.0 });
+  var mat = solidMat(U, bark, { rib: 0, grain: 1, barkN: barkN, barkPlate: kind === 'pine' ? 3.5 : 6.0, aoH: 0.08 });
   var tpl = trunkTemplate(R, kind);
   var solids = [], rots = [];
   for (var i = 0; i < items.length; i++) {
