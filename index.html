@@ -1922,8 +1922,12 @@ function makePropTexture(kind, P, R, opts) {
       var bang = -Math.PI * (0.10 + br * 0.133) + R.range(-0.06, 0.06);
       drawBranches(g, S, S / 2, forkY, S * R.range(0.24, 0.34), bang, S * 0.024, 3, R, '#5d4c34', atips);
     }
-    drawCrown(g, S, 'acacia', P, R, S / 2, S * 0.32, S * 0.42, S * 0.13, ac, alite,
-      { sprays: 90, sprayR: 0.055, leaves: 16, leafW: 0.004, leafL: 0.007, flatTop: true, tips: atips });
+    /* The leaves were set to 0.004 by 0.007 of the card against a usual
+       0.010 by 0.018, which is a sixth of the area each. Ninety sprays of them
+       covered about a quarter of the crown, so the limbs showed through and
+       the tree read as a bare broom. Cover the crown. */
+    drawCrown(g, S, 'acacia', P, R, S / 2, S * 0.32, S * 0.42, S * 0.155, ac, alite,
+      { sprays: 120, sprayR: 0.072, leaves: 14, leafW: 0.008, leafL: 0.013, flatTop: true, tips: atips });
   } else if (kind === 'rock') {
     var rc = new THREE.Color(P.rockCol);
     var top = S * R.range(0.30, 0.52);
