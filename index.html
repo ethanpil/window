@@ -7387,7 +7387,11 @@ function layout() {
   if (!App.P || !App.camera || !App.renderer) return;
   var w = window.innerWidth, h = window.innerHeight;
   var P = App.P, cam = App.camera, r = App.renderer;
-  cam.aspect = w / h;
+  /* A view that has not been laid out yet reports no size at all, and 0/0 is
+     NaN. That ran on through the window sizing into the wall texture, where a
+     non-finite gradient throws, and the throw left the view black for good.
+     Carry on with a plain square until a real size arrives. */
+  cam.aspect = (w > 0 && h > 0) ? w / h : 1;
   var changed = sizeWindow(P, cam.aspect);
   App.camDist = P.win.dist;
 
@@ -7395,7 +7399,7 @@ function layout() {
   cam.lookAt(0, P.win.cy - PITCH * (20 + App.camDist), -20);
   cam.updateProjectionMatrix();
   r.setPixelRatio(qualityRatio());
-  r.setSize(w, h, false);
+  r.setSize(Math.max(1, w), Math.max(1, h), false);
   setupPost();
   FX.resize();
 
