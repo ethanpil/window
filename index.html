@@ -1391,6 +1391,14 @@ function Q() { return QUALITY[App.qTier == null ? 1 : App.qTier]; }
 /* The opening is cut to the shape of the screen: wide on a desktop, tall on a
    phone. Panes are added or dropped so they stay roughly square either way. */
 function sizeWindow(P, aspect) {
+  /* A view that has not been laid out yet reports no size at all, and 0/0 is
+     NaN. That travels into the width of the opening and on into the wall
+     texture, where createRadialGradient throws on a non-finite radius, out of
+     the middle of the build, leaving the view black for good. Guarding the
+     one caller in layout() was not enough: the world build calls this with
+     window.innerWidth / window.innerHeight of its own. Guard it here, where
+     every caller is covered. */
+  if (!isFinite(aspect) || aspect <= 0) aspect = 1;
   var tanV = Math.tan(VFOV * Math.PI / 360);
   var tanH = tanV * aspect;
   var W = P.win;
