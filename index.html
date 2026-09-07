@@ -3856,18 +3856,22 @@ function solidMat(U, colour, opts) {
       '    float lich = smoothstep(0.54, 0.78, lf);',
       '    c = mix(c, uLichen * (0.4 + 0.6 * length(vCol) / max(length(uBody), 0.05)), lich * upFace * 0.70);',
       '  } else if (uGrain > 0.5) {',
-      /* Bark runs UP the trunk in ridges and fissures. The old pattern was a
-         grid of horizontal bands, which read as a painted road. These ridges
-         wander as they climb, split into plates, and carry a fine grain. */
-      '    float wob = sin(vUp * 8.0 + vSeed) * 0.020 + sin(vUp * 21.0 + vSeed * 2.3) * 0.008;',
-      '    float u = vRib + wob + vSeed * 0.159;',
-      '    float kB = bandLimit(u, uBarkN);',
-      '    float fis = abs(fract(u * uBarkN) - 0.5) * 2.0;',
-      '    c *= 1.0 - 0.40 * smoothstep(0.45, 1.0, fis) * kB;',
-      '    float plate = h3(vec3(floor(u * uBarkN), floor(vUp * uBarkPlate + vSeed), 1.0));',
-      '    c *= 1.0 + 0.20 * (plate - 0.5) * min(kB, bandLimit(vUp, uBarkPlate));',
-      '    float gn = h3(vec3(floor(u * uBarkN * 3.0), floor(vUp * 70.0), 3.0));',
-      '    c *= 1.0 + 0.16 * (gn - 0.5) * bandLimit(vUp, 70.0);',
+      /* Bark is not a comb. This was a triangle wave at one fixed pitch with
+         a slow wobble laid over it, every ridge the same width and the same
+         depth as its neighbour, and only four bands of variation over the
+         whole height. A trunk therefore came out as a fluted column of even
+         stripes. Let the ridges wander, let each carry its own depth along
+         its length, and break the trunk across them. */
+      '    float wander = (vn3(vec3(vRib * 4.0, vUp * 9.0, vSeed)) - 0.5) * 1.6;',
+      '    float u = vRib * uBarkN + wander + vSeed * 2.6;',
+      '    float kB = bandLimit(u, 1.0);',
+      '    float ridge = abs(fract(u) - 0.5) * 2.0;',
+      '    float deep = vn3(vec3(floor(u) * 1.7, vUp * 4.0, 11.0));',
+      '    c *= 1.0 - (0.16 + 0.34 * deep) * smoothstep(0.34, 1.0, ridge) * kB;',
+      '    float plate = h3(vec3(floor(u), floor(vUp * uBarkPlate * 4.0 + vSeed), 1.0));',
+      '    c *= 1.0 + 0.22 * (plate - 0.5) * min(kB, bandLimit(vUp, uBarkPlate * 4.0));',
+      '    float gn = h3(vec3(floor(u * 3.0), floor(vUp * 70.0), 3.0));',
+      '    c *= 1.0 + 0.14 * (gn - 0.5) * bandLimit(vUp, 70.0);',
       '  }',
       '  gl_FragColor = vec4(c, 1.0);',
       '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
