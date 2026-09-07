@@ -3524,6 +3524,10 @@ function buildFlowers(scene, P, R, U, H) {
 function pushTube(B, path, radii, seg, ribs) {
   var start = B.pos.length / 3, i, j;
   var rn = ribs ? ribs.n : 0, ra = ribs ? ribs.amp : 0;
+  /* A flute the ring cannot resolve aliases into a coarser, faceted one: 16
+     ribs read round a ring of 24 come back as 8 hard lobes. Carry enough
+     samples for the ribs asked for. */
+  if (rn) seg = Math.min(64, Math.max(seg, rn * 4));
   var ref = new THREE.Vector3(1, 0, 0);
   var T = new THREE.Vector3(), N = new THREE.Vector3(), Bi = new THREE.Vector3(), prev = null;
   for (i = 0; i < path.length; i++) {
