@@ -5323,6 +5323,7 @@ function buildCascadeFall(scene, P, R, U, H) {
       uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uHazeK: U.uHazeK,
       uLen: { value: total }
     },
+    extensions: { derivatives: true },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
     vertexShader: [
       'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
@@ -5340,23 +5341,44 @@ function buildCascadeFall(scene, P, R, U, H) {
       GLSL_TONE,
       'uniform float uTime, uLen; varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
       'float h1(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.545); }',
+      /* Value noise. Read with the fall stretched against the width, it draws
+         threads rather than blobs. The old pattern cut the sheet into thirty
+         columns and gave each one a single brightness across its whole width,
+         so it could only ever read as a row of vertical bars. */
+      'float vn(vec2 p){',
+      '  vec2 i = floor(p), f = fract(p);',
+      '  f = f * f * (3.0 - 2.0 * f);',
+      '  return mix(mix(h1(i), h1(i + vec2(1.0, 0.0)), f.x),',
+      '             mix(h1(i + vec2(0.0, 1.0)), h1(i + vec2(1.0, 1.0)), f.x), f.y);',
+      '}',
       'void main(){',
-      /* strands run the length of the ribbon, accelerating as they descend */
-      '  float lane = floor(vUv.x * 30.0);',
-      '  float speed = 0.5 + h1(vec2(lane, 1.0)) * 0.4;',
-      '  float fall = vUv.y * uLen * 0.09 - uTime * speed;',
-      /* fract() ramps up and then drops in one step, which laid a hard line
-         across every strand and made the sheet read as courses of brick. A
-         cosine carries the same streaking with no seam to see. */
-      '  float strand = 0.5 - 0.5 * cos((fall + h1(vec2(lane, 7.0)) * 9.0) * 6.2832);',
-      '  float bright = smoothstep(0.12, 0.88, strand);',
-      /* the ribbon is fullest in the middle and feathers at its edges */
-      '  float body = 1.0 - smoothstep(0.30, 0.5, abs(vUv.x - 0.5));',
-      /* white water builds toward the foot */
-      '  float froth = smoothstep(0.55, 0.05, vUv.y);',
-      '  float a = body * (0.50 + 0.50 * bright) * (0.72 + 0.28 * froth);',
-      '  vec3 c = mix(vec3(0.70, 0.79, 0.84), vec3(1.0), bright * 0.75 + froth * 0.45);',
-      '  gl_FragColor = vec4(tone(mix(c * vTint * 0.5, vHaze, vFog * 0.7)), a * 0.88 * (1.0 - vFog * 0.6));',
+      '  float d = vUv.y;',                       /* 0 at the head, 1 in the pool */
+      /* the water gathers speed as it drops, so the threads run faster below */
+      '  float sp = 0.8 + d * 1.1;',
+      '  float x = vUv.x * 6.0 + sin(d * 5.0 + uTime * 0.3) * 0.4;',
+      '  float y = d * uLen * 0.075;',
+      '  float n1 = vn(vec2(x, y - uTime * sp * 1.7));',
+      '  float n2 = vn(vec2(x * 2.1 + 4.3, y * 2.3 - uTime * sp * 2.6));',
+      '  float n3 = vn(vec2(x * 4.4 + 9.7, y * 4.8 - uTime * sp * 3.9));',
+      /* a thread finer than a pixel would only crawl, so let it average out */
+      '  float px = fwidth(x);',
+      '  float k2 = 1.0 - smoothstep(0.25, 0.80, px * 2.1);',
+      '  float k3 = 1.0 - smoothstep(0.25, 0.80, px * 4.4);',
+      '  float w = n1 * 0.50 + mix(0.5, n2, k2) * 0.32 + mix(0.5, n3, k3) * 0.18;',
+      /* three noises summed bunch about a half, which is a flat wash. Open the
+         middle of the range back out so the threads read. */
+      '  w = clamp((w - 0.30) * 2.6, 0.0, 1.0);',
+      /* whole over the lip, fraying into threads the further it falls */
+      '  float veil = smoothstep(mix(0.10, 0.40, d), mix(0.42, 0.80, d), w);',
+      /* the sheet feathers to nothing at either edge */
+      '  float body = smoothstep(0.0, 0.14, vUv.x) * smoothstep(1.0, 0.86, vUv.x);',
+      /* white water where it lands, and a little breaking over the lip. This
+         was the other way about, so the froth gathered at the head. */
+      '  float froth = max(smoothstep(0.76, 1.0, d), smoothstep(0.05, 0.0, d) * 0.6);',
+      /* a body of water carrying threads, not threads alone */
+      '  float a = body * mix(0.30 + 0.70 * veil, 1.0, froth * 0.9);',
+      '  vec3 c = mix(vec3(0.55, 0.67, 0.76), vec3(1.0), clamp(w * 0.85 + froth * 0.9, 0.0, 1.0));',
+      '  gl_FragColor = vec4(tone(mix(c * vTint * 0.55, vHaze, vFog * 0.7)), a * 0.95 * (1.0 - vFog * 0.6));',
       '}'
     ].join('\n')
   });
