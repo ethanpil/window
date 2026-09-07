@@ -3778,6 +3778,14 @@ function solidMat(U, colour, opts) {
       'float bandLimit(float x, float freq){ float w = fwidth(x) * freq; return 1.0 - smoothstep(0.30, 0.85, w); }',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
       'float h3(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }',
+      /* smooth value noise: a hash alone is constant across its cell, which
+         is what made lichen come out as flat squares */
+      'float vn3(vec3 p){',
+      '  vec3 i = floor(p), f = fract(p);',
+      '  f = f * f * (3.0 - 2.0 * f);',
+      '  return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),',
+      '             mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);',
+      '}',
       'void main(){',
       '  vec3 c = vCol;',
       '  float rr = vRib * 6.2832 * uRibN;',
@@ -3827,8 +3835,12 @@ function solidMat(U, colour, opts) {
       '    c *= 1.0 - 0.30 * crack * kSeam;',
       '    c *= 1.0 + 0.12 * (h3(vec3(cell, 1.7)) - 0.5) * kSeam;',   /* each facet its own shade */
       '    float upFace = smoothstep(0.35, 0.8, vNrm.y);',
-      '    float lich = step(0.90, h3(floor(q * 1.6) + 7.0)) * step(0.4, m2);',
-      '    c = mix(c, uLichen * (0.4 + 0.6 * length(vCol) / max(length(uBody), 0.05)), lich * upFace * 0.75);',
+      /* Lichen was a hard step on a grid about three cells wide on a boulder,
+         so it read as yellow squares painted on the stone. Grow it on smooth
+         noise at two scales instead, and thin the fine one with distance. */
+      '    float lf = vn3(q * 3.4) * 0.66 + mix(0.5, vn3(q * 9.0), k9) * 0.34;',
+      '    float lich = smoothstep(0.54, 0.78, lf);',
+      '    c = mix(c, uLichen * (0.4 + 0.6 * length(vCol) / max(length(uBody), 0.05)), lich * upFace * 0.70);',
       '  } else if (uGrain > 0.5) {',
       /* Bark runs UP the trunk in ridges and fissures. The old pattern was a
          grid of horizontal bands, which read as a painted road. These ridges
