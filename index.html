@@ -2701,7 +2701,9 @@ function makeHeightField(P) {
       var side = Math.abs(x - P.fallX);
       var face = faceAt(z);
       /* the gully the water has cut: deep in the middle, flaring at the edges */
-      var gully = 1 - smoothstep(notch * 0.45, notch * 1.9, side);
+      /* tight enough to have walls: flared over four times its own floor,
+         the channel was a dish and read as no channel at all */
+      var gully = 1 - smoothstep(notch * 0.48, notch * 1.25, side);
       var h = face - gully * P.gullyDepth * clamp((poolZ - z) / 30, 0, 1);
       /* the valley floor in front, with the plunge pool at the foot of the fall */
       if (z > poolZ) {
@@ -5406,12 +5408,19 @@ function buildCascadeFall(scene, P, R, U, H) {
       var e = g.drop ? (1 - t) * (1 - t) * (3 - 2 * (1 - t)) : (1 - t);
       var z = g.z1 + (g.z0 - g.z1) * t;
       var y = g.y0 + (g.y1 - g.y0) * e;
-      /* a pitch narrows as it falls and the water gathers speed; a bench spreads */
-      var w = notch * (g.drop ? (0.42 + 0.30 * t) : (0.55 + 0.42 * t));
+      /* A pitch narrows as it falls and the water gathers speed; a bench
+         spreads. The sheet used to reach almost the full width of the notch,
+         which is wider than the floor of the gully it is meant to run in, so
+         its edges lay out on the open hillside with nothing to sit in and
+         simply faded out over the grass. Keep it inside its channel. */
+      var w = notch * (g.drop ? (0.24 + 0.11 * t) : (0.30 + 0.13 * t));
       pts.push({ z: z, y: y, w: w, drop: g.drop });
     }
   }
-  pts.push({ z: P.poolZ + 6, y: P.waterY + 0.15, w: notch * 1.05, drop: 0 });
+  /* where it meets the pool it spreads, but not to twice the width of the
+     channel above it: that one point splayed the foot of the fall out
+     across the open ground */
+  pts.push({ z: P.poolZ + 6, y: P.waterY + 0.15, w: notch * 0.52, drop: 0 });
   for (var q = 1; q < pts.length; q++)
     total += Math.hypot(pts[q].z - pts[q - 1].z, pts[q].y - pts[q - 1].y);
 
@@ -5519,7 +5528,7 @@ function buildCascadeFall(scene, P, R, U, H) {
       /* whole over the lip, fraying into threads the further it falls */
       '  float veil = smoothstep(mix(0.10, 0.40, d), mix(0.42, 0.80, d), w);',
       /* the sheet feathers to nothing at either edge */
-      '  float body = smoothstep(0.0, 0.14, vUv.x) * smoothstep(1.0, 0.86, vUv.x);',
+      '  float body = smoothstep(0.0, 0.09, vUv.x) * smoothstep(1.0, 0.91, vUv.x);',
       /* white water where it lands, and a little breaking over the lip. This
          was the other way about, so the froth gathered at the head. */
       '  float froth = max(smoothstep(0.76, 1.0, d), smoothstep(0.05, 0.0, d) * 0.6);',
