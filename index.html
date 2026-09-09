@@ -5462,13 +5462,19 @@ function buildCascadeFall(scene, P, R, U, H) {
       '}',
       'void main(){',
       '  float d = vUv.y;',                       /* 0 at the head, 1 in the pool */
-      /* the water gathers speed as it drops, so the threads run faster below */
-      '  float sp = 0.8 + d * 1.1;',
+      /* The water gathers speed as it drops. That has to come from the shape
+         of the fall coordinate, never from scaling uTime by depth: with
+         y - uTime * (0.8 + 1.1 * d) the phase of the pattern is
+         d * (k - 1.87 * uTime), whose sign turns over at uTime = k / 1.87.
+         For a fall of eighty metres that is three seconds after the view
+         opens, and from then on the water ran upward for ever. Raising d to
+         a power under one makes the threads quicken as they descend and
+         cannot change their direction. */
       '  float x = vUv.x * 6.0 + sin(d * 5.0 + uTime * 0.3) * 0.4;',
-      '  float y = d * uLen * 0.075;',
-      '  float n1 = vn(vec2(x, y - uTime * sp * 1.7));',
-      '  float n2 = vn(vec2(x * 2.1 + 4.3, y * 2.3 - uTime * sp * 2.6));',
-      '  float n3 = vn(vec2(x * 4.4 + 9.7, y * 4.8 - uTime * sp * 3.9));',
+      '  float y = pow(d, 0.62) * uLen * 0.075;',
+      '  float n1 = vn(vec2(x, y - uTime * 1.9));',
+      '  float n2 = vn(vec2(x * 2.1 + 4.3, y * 2.3 - uTime * 4.6));',
+      '  float n3 = vn(vec2(x * 4.4 + 9.7, y * 4.8 - uTime * 9.8));',
       /* a thread finer than a pixel would only crawl, so let it average out */
       '  float px = fwidth(x);',
       '  float k2 = 1.0 - smoothstep(0.25, 0.80, px * 2.1);',
