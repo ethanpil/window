@@ -6857,7 +6857,13 @@ function buildVisitors(scene, P, R, U, H) {
   P.visitor = kind;
 
   var quad = new THREE.PlaneGeometry(1, 1);
-  quad.translate(0, kind === 'deer' ? 0.5 : 0, 0);
+  /* Where the card hangs from its own origin. A deer stands on the ground and
+     a balloon or a goose hangs by its middle, but a boat was hanging by its
+     middle too, and the hull is drawn near the foot of its card: that put the
+     bottom of the hull about a fifth of the card below the origin, which for
+     a boat eight metres long is nearly two metres under the water. Hang it by
+     its waterline instead. */
+  quad.translate(0, kind === 'deer' ? 0.5 : (kind === 'boat' ? 0.19 : 0), 0);
   var geo = new THREE.InstancedBufferGeometry();
   geo.index = quad.index;
   geo.setAttribute('position', quad.attributes.position);
