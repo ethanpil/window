@@ -7695,7 +7695,8 @@ function updateWeather(t) {
   App.sun.position.copy(sd).multiplyScalar(60);
   App.sun.target.position.set(0, P.win.cy, 0);
   App.sun.color.copy(U.uSunCol.value);
-  App.sun.intensity = 0.9;
+  /* the sun lights the room only through the window, not through the back wall */
+  App.sun.intensity = 0.9 * smoothstep(0.05, -0.15, sd.z);
   App.fill.color.copy(U.uAmbCol.value);
   App.fill.intensity = 1.25;
   App.amb.color.copy(U.uFogCol.value);
