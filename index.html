@@ -4534,6 +4534,11 @@ function cactusTemplate(R, kind) {
 
 function solidMat(U, colour, opts) {
   opts = opts || {};
+  /* opts.facade = { kind, win, bay, roof, doorW, doorH, round }: walls drawn as
+     a building's. kind 0 vertical boards, 1 log courses, 2 render, 3 coursed
+     stone, 4 brick, 5 corrugated sheet. Lengths in metres in the object's own
+     frame; the trim part (rib 1) is the roof. See the grain 4 branch below. */
+  var fac = opts.facade || {};
   return new THREE.ShaderMaterial({
     extensions: { derivatives: true },
     uniforms: {
@@ -4551,17 +4556,21 @@ function solidMat(U, colour, opts) {
       uBarkPlate: { value: opts.barkPlate || 5.0 },
       uLichen: { value: new THREE.Color(opts.lichen || '#8f9a3c') },
       uNodes: { value: opts.nodes || 0 },
-      uGrain: { value: opts.grain || 0 },
+      uGrain: { value: opts.facade ? 4 : (opts.grain || 0) },
       uSpin: { value: opts.spin || 0 },
       uAoH: { value: opts.aoH == null ? 0.35 : opts.aoH },
-      uTwoTone: { value: opts.twoTone ? 1 : 0 }
+      uTwoTone: { value: opts.twoTone ? 1 : 0 },
+      /* facade (grain 4): [cladding, share of bays with a window, bay width m,
+         roof 0 tiles / 1 corrugated] and [door width m, door height m, round] */
+      uFac: { value: new THREE.Vector4(fac.kind || 0, fac.win || 0, fac.bay || 2.6, fac.roof || 0) },
+      uFac2: { value: new THREE.Vector3(fac.doorW || 0, fac.doorH || 2.1, fac.round ? 1 : 0) }
     },
     vertexShader: [
       'attribute vec3 iPos; attribute vec4 iAttr; attribute float rib;',
       'uniform float uTime, uFogDensity, uShadow, uSpin, uAoH;',
       'uniform vec3 uSunDir, uSunCol, uAmbCol, uBody, uFogCol;',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
-      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF;',
+      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF; varying vec3 vMet; varying vec3 vNl;',
       GLSL_COMMON,
       'void main(){',
       '  float sc = iAttr.x, rot = iAttr.y;',
@@ -4591,7 +4600,7 @@ function solidMat(U, colour, opts) {
          big wall or roof is not lit from its corners */
       '  vCol = uBody * hemi(n, uAmbCol * 1.1) * ao * mix(1.0, bk.y, 0.6);',
       '  vCol *= 1.0 - 0.25 * uWet;',
-      '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n; vWp = wp;',
+      '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n; vWp = wp; vMet = lp; vNl = nl;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  float fH = fogAmtH(-mv.z, uFogDensity, wp.y);',
       '  vFogF = fH; vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, fH);',
@@ -4609,7 +4618,8 @@ function solidMat(U, colour, opts) {
          limit, which is what a mip-map would have done for a texture. */
       'float bandLimit(float x, float freq){ float w = fwidth(x) * freq; return 1.0 - smoothstep(0.30, 0.85, w); }',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
-      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF;',
+      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF; varying vec3 vMet; varying vec3 vNl;',
+      'uniform vec4 uFac; uniform vec3 uFac2;',
       'float h3(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }',
       /* smooth value noise: a hash alone is constant across its cell, which
          is what made lichen come out as flat squares */
@@ -4652,7 +4662,76 @@ function solidMat(U, colour, opts) {
       '    c *= 0.78 + 0.22 * smoothstep(0.02, 0.13, seg);',
       '    c *= 1.0 + 0.10 * cos(vRib * 25.13) * bandLimit(vRib, 4.0);',
       '  }',
-      '  if (uGrain > 1.5) {',
+      '  if (uGrain > 3.5) {',
+      /* A building: its walls clad (boards, logs, render, coursed stone, brick
+         or corrugated sheet), windows in bays with dark glass and a pale frame,
+         a door on the side facing the window, roof courses or corrugation, and
+         a damp, darker foot. Measured in metres in the object's frame, so the
+         courses are the same size on a cabin and a barn. Every pattern fades
+         to its mean once it is finer than a pixel. */
+      '    vec3 m = vMet, nl = normalize(vNl);',
+      '    float wall = (1.0 - step(0.5, vRib)) * (1.0 - smoothstep(0.35, 0.6, abs(nl.y)));',
+      '    float rnd = uFac2.z;',
+      '    float rad = length(m.xz);',
+      '    float u = mix(abs(nl.x) > abs(nl.z) ? m.z : m.x, atan(m.z, m.x) * rad, rnd);',
+      '    float v = m.y;',
+      '    float wu = fwidth(u), wv = fwidth(v);',
+      '    float kd = uFac.x, g = 1.0;',
+      '    if (kd < 0.5) {',
+      '      float bu = u / 0.22, kb = 1.0 - smoothstep(0.30, 0.85, wu / 0.22);',
+      '      g = (1.0 - 0.32 * smoothstep(0.84, 1.0, abs(fract(bu) - 0.5) * 2.0) * kb) * (1.0 + 0.12 * (h3(vec3(floor(bu), vSeed, 2.0)) - 0.5) * kb);',
+      '    } else if (kd < 1.5) {',
+      '      float bv = v / 0.27, kl = 1.0 - smoothstep(0.30, 0.85, wv / 0.27);',
+      '      g = mix(0.86, 0.60 + 0.48 * sin(fract(bv) * 3.1416), kl) * (1.0 + 0.10 * (h3(vec3(floor(bv), vSeed, 4.0)) - 0.5) * kl);',
+      '    } else if (kd < 2.5) {',
+      '      g = 0.92 + 0.16 * vn3(m * 0.8 + vSeed);',
+      '    } else if (kd < 4.5) {',
+      '      vec2 bs = kd < 3.5 ? vec2(0.55, 0.32) : vec2(0.23, 0.075);',
+      '      float row = floor(v / bs.y), bu = u / bs.x + row * 0.5;',
+      '      float kS = 1.0 - smoothstep(0.30, 0.85, max(wv / bs.y, wu / bs.x));',
+      '      float jn = max(smoothstep(0.84, 1.0, abs(fract(v / bs.y) - 0.5) * 2.0), smoothstep(0.90, 1.0, abs(fract(bu) - 0.5) * 2.0));',
+      '      g = (1.0 + (kd < 3.5 ? -0.32 : 0.22) * jn * kS) * (1.0 + 0.18 * (h3(vec3(floor(bu), row, vSeed)) - 0.5) * kS);',
+      '    } else {',
+      '      float kc = 1.0 - smoothstep(0.30, 0.85, wu / 0.076);',
+      '      g = 1.0 + 0.14 * cos(u / 0.076 * 6.2832) * kc;',
+      '    }',
+      '    c *= mix(1.0, g, wall);',
+      /* the roof: tile courses up the slope, or the ribs of a tin roof down it */
+      '    float roofK = step(0.5, vRib) * smoothstep(0.15, 0.4, abs(nl.y));',
+      '    float kR = 1.0 - smoothstep(0.30, 0.85, (uFac.w > 0.5 ? wu / 0.076 : wv / 0.2));',
+      '    c *= 1.0 - roofK * kR * (uFac.w > 0.5 ? 0.12 * (0.5 + 0.5 * cos(u / 0.076 * 6.2832)) : 0.26 * smoothstep(0.72, 1.0, fract(v / 0.2)));',
+      /* the door, on whichever wall faces the window */
+      '    vec3 toC = cameraPosition - vWp; vec2 tc = normalize(toC.xz + vec2(1e-4, 0.0));',
+      '    float facing = dot(normalize(vNrm.xz + vec2(1e-4, 0.0)), tc);',
+      '    float halfD = uFac2.x * 0.5;',
+      '    float onDoor = mix(step(0.55, facing) * step(abs(u), halfD), step(cos(min(halfD / max(rad, 0.5), 1.4)), facing), rnd);',
+      '    float door = onDoor * step(v, uFac2.y) * step(0.0, v) * step(0.01, uFac2.x) * wall;',
+      /* windows: a sill a metre up each storey, in some of the bays */
+      '    float cu = u / uFac.z, cv = (v - 0.9) / 2.9;',
+      '    vec2 wc = vec2(floor(cu + 0.5), floor(cv));',
+      '    vec2 wf = vec2(fract(cu + 0.5) - 0.5, fract(cv));',
+      '    float has = step(h3(vec3(wc, vSeed + floor(nl.x * 2.0 + nl.z * 3.0 + 7.0))), uFac.y) * step(0.0, cv) * (1.0 - onDoor * step(v, uFac2.y + 0.6));',
+      '    float hw = 0.46 / uFac.z, ex = wu / uFac.z, ey = wv / 2.9;',
+      '    float inner = (1.0 - smoothstep(hw - ex, hw + ex, abs(wf.x))) * smoothstep(0.10 - ey, 0.10 + ey, wf.y) * (1.0 - smoothstep(0.52 - ey, 0.52 + ey, wf.y));',
+      '    float outer = (1.0 - smoothstep(hw + 0.07 / uFac.z - ex, hw + 0.07 / uFac.z + ex, abs(wf.x))) * smoothstep(0.075 - ey, 0.075 + ey, wf.y) * (1.0 - smoothstep(0.545 - ey, 0.545 + ey, wf.y));',
+      '    float kW = 1.0 - smoothstep(0.30, 0.85, max(wu, wv) * 2.5);',
+      '    vec3 glass = mix(vec3(0.05, 0.06, 0.07) + vHaze * 0.25 * pow(1.0 - abs(dot(normalize(vNrm), normalize(toC))), 2.0), vHaze, vFogF);',
+      '    vec3 frameC = mix(length(litC) * vec3(0.55, 0.54, 0.51), vHaze, vFogF * 0.5);',
+      '    c = mix(c, frameC, (outer - inner) * has * wall * kW);',
+      '    c = mix(c, glass, inner * has * wall * kW);',
+      '    c *= 1.0 - wall * (1.0 - kW) * uFac.y * 0.14;',
+      '    c = mix(c, c * vec3(0.42, 0.38, 0.34), door * kW);',
+      '    c *= 1.0 - 0.18 * wall * (1.0 - smoothstep(0.0, 0.7, v));',
+      '  } else if (uGrain > 2.5) {',
+      /* foliage (a hedge): clumps of leaves at two scales with dark gaps
+         between them, new growth paler, each faded out as it nears a pixel */
+      '    vec3 q = vLocal * vec3(7.0, 9.0, 9.0) + vSeed * 3.1;',
+      '    float w = max(fwidth(q.x), max(fwidth(q.y), fwidth(q.z)));',
+      '    float k1 = 1.0 - smoothstep(0.30, 0.85, w), k2 = 1.0 - smoothstep(0.30, 0.85, w * 2.8);',
+      '    float leaf = mix(0.5, vn3(q), k1) * 0.6 + mix(0.5, vn3(q * 2.8 + 5.3), k2) * 0.4;',
+      '    c *= 0.58 + 0.80 * leaf;',
+      '    c = mix(c, c * uBody2 / max(uBody, vec3(0.02)), smoothstep(0.62, 0.92, leaf) * 0.45 * k1);',
+      '  } else if (uGrain > 1.5) {',
       /* stone: two tones mottled at two scales, a fine speckle, dark seams,
          and lichen on the faces that see the sky */
       '    vec3 q = vLocal + vSeed;',
@@ -4687,15 +4766,6 @@ function solidMat(U, colour, opts) {
       '    float lf = vn3(q * 3.4) * 0.66 + mix(0.5, vn3(q * 9.0), k9) * 0.34;',
       '    float lich = smoothstep(0.54, 0.78, lf);',
       '    c = mix(c, uLichen * (0.4 + 0.6 * length(litC) / max(length(uBody), 0.05)), lich * upFace * 0.70);',
-      '  } else if (uGrain > 2.5) {',
-      /* foliage (a hedge): clumps of leaves at two scales with dark gaps
-         between them, new growth paler, each faded out as it nears a pixel */
-      '    vec3 q = vLocal * vec3(7.0, 9.0, 9.0) + vSeed * 3.1;',
-      '    float w = max(fwidth(q.x), max(fwidth(q.y), fwidth(q.z)));',
-      '    float k1 = 1.0 - smoothstep(0.30, 0.85, w), k2 = 1.0 - smoothstep(0.30, 0.85, w * 2.8);',
-      '    float leaf = mix(0.5, vn3(q), k1) * 0.6 + mix(0.5, vn3(q * 2.8 + 5.3), k2) * 0.4;',
-      '    c *= 0.58 + 0.80 * leaf;',
-      '    c = mix(c, c * uBody2 / max(uBody, vec3(0.02)), smoothstep(0.62, 0.92, leaf) * 0.45 * k1);',
       '  } else if (uGrain > 0.5) {',
       /* Bark is not a comb. This was a triangle wave at one fixed pitch with
          a slow wobble laid over it, every ridge the same width and the same
@@ -5745,6 +5815,20 @@ var LANDMARKS = {
   watertank:  { biomes: ['desert', 'saltflat', 'savanna', 'urban', 'farmland', 'hayfield'], scale: [8, 12], body: '#9aa0a2', trim: '#6f7476' },
   jetty:      { biomes: ['lakefront', 'coast', 'marsh', 'river'], scale: [6, 9], body: '#6a5a45', trim: '#4e4235' }
 };
+/* What each landmark is built of, for solidMat's facade grain (metres). */
+var LANDMARK_FACADE = {
+  barn:       { kind: 0, win: 0.25, bay: 3.2, roof: 1, doorW: 3.0, doorH: 3.2 },
+  house:      { kind: 2, win: 0.85, bay: 2.6, roof: 0, doorW: 1.0, doorH: 2.1 },
+  cabin:      { kind: 1, win: 0.6, bay: 2.4, roof: 0, doorW: 0.9, doorH: 2.0 },
+  tower:      { kind: 3, win: 0.12, bay: 2.2, roof: 0, doorW: 1.0, doorH: 2.0 },
+  windmill:   { kind: 2, win: 0.22, bay: 2.5, roof: 0, doorW: 1.0, doorH: 2.0, round: 1 },
+  lighthouse: { kind: 2, win: 0.18, bay: 2.0, roof: 1, doorW: 0.9, doorH: 2.0, round: 1 },
+  silo:       { kind: 5, win: 0, bay: 3, roof: 1, doorW: 0, round: 1 },
+  smokestack: { kind: 4, win: 0.15, bay: 2.4, roof: 0, doorW: 0, round: 1 },
+  watertank:  { kind: 5, win: 0, bay: 3, roof: 1, doorW: 0, round: 1 },
+  pagoda:     { kind: 0, win: 0.3, bay: 2.0, roof: 0, doorW: 1.2, doorH: 2.2 },
+  jetty:      { kind: 0, win: 0, bay: 3, roof: 0, doorW: 0 }
+};
 /* Where the windshaft sits on the tower, in the same units as landmarkGeo. */
 var WINDMILL_HUB = [0, 0.74, -0.22];
 /* Four sails on one shaft, built about the origin so the whole cross turns
@@ -5955,7 +6039,7 @@ function buildLandmark(scene, P, R, U, H) {
     y = Math.min(y, H(x + (cq & 1 ? bb.max.x : bb.min.x) * sz * 0.9, z + (cq & 2 ? bb.max.z : bb.min.z) * sz * 0.9));
   y -= 0.1;
   if (kind === 'jetty' && P.waterY != null) y = P.waterY - 0.4;
-  var mat = solidMat(U, L.body, { rib: 0, grain: 0, spines: 0, body2: L.trim, twoTone: 1 });
+  var mat = solidMat(U, L.body, { rib: 0, grain: 0, spines: 0, body2: L.trim, twoTone: 1, facade: LANDMARK_FACADE[kind] });
   instanceSolid(scene, lgeo, [[x, y, z, sz, 0, 1, 1]], mat);
   App._shadows.push([x, y, z, sz * 0.30, 0.85, sz]);
   if (kind === 'windmill') {
