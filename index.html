@@ -4110,16 +4110,39 @@ function buildCity(scene, P, R, U, H) {
       var ha = R.range(-1.15, 1.15), hr = 60 + Math.pow(R.f(), 0.9) * 150;
       var hx = Math.sin(ha) * hr, hz = -Math.cos(ha) * hr;
       if (!plantable(P, H, hx, hz)) continue;
-      var hs = R.range(4.5, 8);
-      houses.push([hx, H(hx, hz) - 0.2, hz, hs, R.range(0, 6.283), R.range(0.8, 1.15), R.range(0.85, 1.2)]);
+      var hs = R.range(4.5, 8), hrot = R.range(0, 6.283), hsy = R.range(0.8, 1.15), hsz = R.range(0.85, 1.2);
+      /* level on the lowest corner, so the downhill side does not stand on air */
+      var hlo = H(hx, hz), hcr = Math.cos(hrot), hsr = Math.sin(hrot);
+      for (var hq = 0; hq < 4; hq++) {
+        var hlx = (hq & 1 ? 0.5 : -0.5) * hs, hlz = (hq & 2 ? 0.38 : -0.38) * hs * hsz;
+        hlo = Math.min(hlo, H(hx + hlx * hcr - hlz * hsr, hz + hlx * hsr + hlz * hcr));
+      }
+      houses.push([hx, hlo - 0.2, hz, hs, hrot, hsy, hsz]);
       App._shadows.push([hx, H(hx, hz), hz, hs * 0.45, 0.8, hs]);
     }
     if (houses.length) instanceSolid(scene, htpl, houses, hmat);
   }
   var rows = R.int(6, 10);
   var start = R.range(240, 360);
-  var spread = R.range(0.9, 1.25);           /* how wide across the view the city runs */
-  var groundAt = function (x, z) { return Math.max(H(x, z), P.waterY != null ? P.waterY + 0.5 : -1e9); };
+  /* how wide across the view the city runs: no wider than can be seen, or
+     most of it stands behind the wall */
+  var spread = Math.min(R.range(0.9, 1.25), visibleHalfAngle(P) * 1.2);
+  /* A city is laid out on a grid: every block turns to one street angle (or
+     a right angle to it). Blocks at random angles read as a pile of boxes. */
+  var gridA = R.range(0, 1.571), gc = Math.cos(gridA), gs = Math.sin(gridA);
+  var placed = [];                            /* footprints in grid space */
+  var footY = function (x, z, hx, hz, rot) {
+    /* the lowest ground under the footprint, or null if any of it is in water */
+    var c2 = Math.cos(rot), s2 = Math.sin(rot), lo = H(x, z);
+    if (P.waterY != null && lo < P.waterY + 1) return null;
+    for (var q = 0; q < 4; q++) {
+      var lx = (q & 1 ? 1 : -1) * hx, lz = (q & 2 ? 1 : -1) * hz;
+      var y = H(x + lx * c2 - lz * s2, z + lx * s2 + lz * c2);
+      if (P.waterY != null && y < P.waterY + 1) return null;
+      lo = Math.min(lo, y);
+    }
+    return lo;
+  };
   for (var band = 0; band < rows; band++) {
     var dist = start + band * R.range(42, 78);
     var n = R.int(9, 18);
@@ -4132,9 +4155,22 @@ function buildCity(scene, P, R, U, H) {
       var mid = 1.0 - Math.abs(band / (rows - 1) - 0.55) * 1.6;
       var tall = R.f() < (0.08 + mid * 0.42);
       var hgt = tall ? R.range(90, 260) * (0.6 + mid * 0.5) : R.range(24, 70);
-      var wid = R.range(16, 46), dep = R.range(16, 46);
-      items.push([x, groundAt(x, z) - 1.5, z, wid, R.range(0, 6.283), hgt / wid, dep / wid, R.f()]);
-      App._shadows.push([x, groundAt(x, z), z, wid * 0.55, 0.9, hgt]);
+      /* no pencils: a tower is at least a seventh as wide as it is tall */
+      var wid = Math.max(R.range(16, 46), hgt / 7), dep = Math.max(R.range(16, 46), hgt / 7);
+      var quarter = Math.floor(R.f() * 4), rot = gridA + quarter * 1.5708, seed = R.f();
+      /* footprint in grid space, with a street's width kept clear around it */
+      var gx = x * gc + z * gs, gz = -x * gs + z * gc;
+      var ex = ((quarter & 1) ? dep : wid) * 0.5 + 4, ez = ((quarter & 1) ? wid : dep) * 0.5 + 4, clash = false;
+      for (var pq = 0; pq < placed.length && !clash; pq++) {
+        var o = placed[pq];
+        clash = Math.abs(gx - o[0]) < ex + o[2] && Math.abs(gz - o[1]) < ez + o[3];
+      }
+      if (clash) continue;
+      var base = footY(x, z, wid * 0.5, dep * 0.5, rot);
+      if (base == null) continue;                   /* never in the river */
+      placed.push([gx, gz, ex, ez]);
+      items.push([x, base - 1, z, wid, rot, hgt / wid, dep / wid, seed]);
+      App._shadows.push([x, base, z, wid * 0.55, 0.9, hgt]);
     }
   }
   cityMesh(scene, P, R, U, items);
@@ -4171,12 +4207,14 @@ function cityMesh(scene, P, R, U, items) {
       uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow, uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale,
       uNight: App.skyU.uNight,
       uWall: { value: new THREE.Color(R.pick(['#6d6560', '#5c5a58', '#7a6f63', '#585f66', '#6b6156'])) },
-      uLit: { value: new THREE.Color(R.pick(['#ffd9a0', '#ffe6bd', '#ffcf8a'])) }
+      uLit: { value: new THREE.Color(R.pick(['#ffd9a0', '#ffe6bd', '#ffcf8a'])) },
+      uCitySeed: { value: R.range(0, 100) }
     },
+    extensions: { derivatives: true },
     vertexShader: [
       'attribute vec3 iPos; attribute vec4 iAttr; attribute float iSeed;',
       'uniform float uFogDensity;',
-      'varying vec3 vN; varying vec3 vL; varying float vFog; varying float vSeed; varying vec3 vSize;',
+      'varying vec3 vN; varying vec3 vL; varying float vFog; varying float vSeed; varying vec3 vSize; varying vec3 vW;',
       GLSL_COMMON,
       'void main(){',
       '  float w = iAttr.x, rot = iAttr.y;',
@@ -4187,7 +4225,7 @@ function cityMesh(scene, P, R, U, items) {
       '  vN = normalize(vec3(normal.x * c - normal.z * s2, normal.y, normal.x * s2 + normal.z * c));',
       '  vL = position;',
       '  vSize = sz;',
-      '  vSeed = iSeed;',
+      '  vSeed = iSeed; vW = wp;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  vFog = fogAmt(-mv.z, uFogDensity);',
       '  gl_Position = projectionMatrix * mv;',
@@ -4196,27 +4234,43 @@ function cityMesh(scene, P, R, U, items) {
     fragmentShader: [
       GLSL_TONE,
       'uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uWall, uLit;',
-      'uniform float uNight, uTime, uShadow;',
-      'varying vec3 vN; varying vec3 vL; varying float vFog; varying float vSeed; varying vec3 vSize;',
+      'uniform float uNight, uTime, uShadow, uCitySeed;',
+      'varying vec3 vN; varying vec3 vL; varying float vFog; varying float vSeed; varying vec3 vSize; varying vec3 vW;',
       'float h21(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }',
+      GLSL_COMMON,
       'void main(){',
-      '  vec3 c = uWall * (0.55 + 0.45 * abs(vN.x) + 0.25 * max(vN.y, 0.0));',
-      '  float diff = max(dot(vN, normalize(uSunDir)), 0.0);',
-      '  c *= (uAmbCol * 1.15 + uSunCol * diff * 0.95);',
+      /* lit by the sun and the sky like everything else, the sky brighter
+         toward the sun as in solidMat, instead of a fixed shade per world axis */
+      '  vec3 sd = normalize(uSunDir);',
+      '  float diff = max(dot(vN, sd), 0.0);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vW.xz, uTime)) * mix(0.30, 1.0, baked(vW.xz));',
+      '  float sky = (0.72 + 0.56 * (dot(vN, sd) * 0.5 + 0.5)) * (0.80 + 0.20 * vN.y);',
+      '  vec3 c = uWall * (uAmbCol * 1.15 * sky + uSunCol * diff * 1.05 * sh);',
       /* pick the two axes that run across whichever face we are on */
       '  vec2 face = abs(vN.y) > 0.5 ? vL.xz : (abs(vN.x) > 0.5 ? vL.zy : vL.xy);',
       '  vec2 span = abs(vN.y) > 0.5 ? vSize.xz : (abs(vN.x) > 0.5 ? vSize.zy : vSize.xy);',
-      '  if (abs(vN.y) < 0.5) {',
-      '    vec2 cell = floor(vec2(face.x * span.x / 3.4, face.y * span.y / 3.6));',
-      '    vec2 f = fract(vec2(face.x * span.x / 3.4, face.y * span.y / 3.6));',
-      '    float pane = step(0.16, f.x) * step(f.x, 0.84) * step(0.22, f.y) * step(f.y, 0.80);',
-      '    float r = h21(cell + vSeed * 37.0);',
+      '  vec2 g = vec2(face.x * span.x / 3.4, face.y * span.y / 3.6);',
+      /* Band-limited: at 300 to 900 m a bay is a few pixels or less, and a hard
+         step grid turns to moire. Edges soften with the pixel footprint and the
+         whole pattern fades to its average once a bay is under a pixel. */
+      '  vec2 fw = fwidth(g);',
+      '  float kW = 1.0 - smoothstep(0.30, 0.85, max(fw.x, fw.y));',
+      '  vec2 cell = floor(g), f = fract(g);',
+      '  float pane = smoothstep(0.16 - fw.x, 0.16 + fw.x, f.x) * (1.0 - smoothstep(0.84 - fw.x, 0.84 + fw.x, f.x))',
+      '             * smoothstep(0.22 - fw.y, 0.22 + fw.y, f.y) * (1.0 - smoothstep(0.80 - fw.y, 0.80 + fw.y, f.y));',
+      '  pane = mix(0.39, pane, kW);',
+      '  float r = h21(cell + vSeed * 37.0);',
       /* a few windows change over the course of an hour */
-      '    float flicker = step(0.5, fract(r * 91.0 + floor(uTime / 47.0 + r * 13.0) * 0.5));',
-      '    float lit = step(1.0 - mix(0.06, 0.42, uNight), r) * mix(1.0, flicker, 0.35);',
-      '    c = mix(c * (0.82 + 0.5 * h21(cell + 5.0)), uLit * 1.5, pane * lit * (0.25 + 0.75 * uNight));',
-      '    c *= mix(1.0, 0.55, pane * (1.0 - lit) * (1.0 - uNight) * 0.8);',
-      '  }',
+      '  float flicker = step(0.5, fract(r * 91.0 + floor(uTime / 47.0 + r * 13.0) * 0.5));',
+      '  float share = mix(0.06, 0.42, uNight);',
+      '  float lit = mix(share, step(1.0 - share, r) * mix(1.0, flicker, 0.35), kW);',
+      /* lit windows show at night, and faintly on a dark day; not in sunshine */
+      '  float dim = 1.0 - smoothstep(0.25, 0.80, dot(uSunCol, vec3(0.30, 0.59, 0.11)));',
+      '  float glow = max(uNight, dim * 0.30);',
+      '  float wall = 1.0 - step(0.5, abs(vN.y));',
+      '  float tint = mix(1.0, 0.82 + 0.5 * h21(cell + 5.0 + vSeed * 53.0 + uCitySeed), kW);',
+      '  c = mix(c, mix(c * tint, uLit * 1.5, pane * lit * glow), wall);',
+      '  c *= mix(1.0, 0.55, pane * (1.0 - lit) * (1.0 - uNight) * 0.8 * wall);',
       '  gl_FragColor = vec4(mix(c, uFogCol, vFog), 1.0);',
       '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
       '}'
@@ -6212,9 +6266,25 @@ function buildRoofs(scene, P, R, U, items) {
     var d = Math.sqrt(it[0] * it[0] + it[2] * it[2]);
     if (d > 700) continue;
     var r = R.f();
-    if (r < 0.30) tanks.push([it[0] + R.range(-w * 0.4, w * 0.4), top, it[2] + R.range(-w * 0.4, w * 0.4), R.range(2.6, 4.6), R.range(0, 6.283), 1, 1]);
-    if (r > 0.25 && r < 0.75) huts.push([it[0] + R.range(-w * 0.5, w * 0.5), top, it[2] + R.range(-w * 0.5, w * 0.5), R.range(3, 7), it[4], R.range(0.5, 1.0), R.range(0.7, 1.4)]);
-    if (r > 0.7) masts.push([it[0] + R.range(-w * 0.6, w * 0.6), top, it[2] + R.range(-w * 0.6, w * 0.6), R.range(4, 11), R.range(0, 6.283), 1, 1]);
+    /* placed in the building's own frame, turned with it, and kept inside
+       the roof's edge: offsets in world x and z put plant rooms in mid-air
+       off the corner of a turned tower */
+    var hw = w, hd = it[3] * it[6] * 0.5, rc = Math.cos(it[4]), rs = Math.sin(it[4]);
+    var onRoof = function (fx, fz, rx, rz) {
+      var lx = fx * Math.max(hw - rx, 0), lz = fz * Math.max(hd - rz, 0);
+      return [it[0] + lx * rc - lz * rs, it[2] + lx * rs + lz * rc];
+    };
+    var fx1 = R.range(-0.8, 0.8), fz1 = R.range(-0.8, 0.8), tr = R.range(0, 6.283);
+    var ts = Math.min(R.range(2.6, 4.6), hw * 0.8, hd * 0.8);
+    /* the tank stands on its legs, which reach 1.1 of its size below it */
+    var tp = onRoof(fx1, fz1, ts * 0.55, ts * 0.55);
+    if (r < 0.30) tanks.push([tp[0], top + ts * 1.1, tp[1], ts, tr, 1, 1]);
+    var fx2 = R.range(-1, 1), fz2 = R.range(-1, 1), hsy2 = R.range(0.5, 1.0);
+    var hs2 = Math.min(R.range(3, 7), hw * 1.6), hsz2 = Math.min(R.range(0.7, 1.4), hd * 1.6 / hs2);
+    var hp = onRoof(fx2, fz2, hs2 * 0.5, hs2 * hsz2 * 0.5);
+    if (r > 0.25 && r < 0.75) huts.push([hp[0], top, hp[1], hs2, it[4], hsy2, hsz2]);
+    var mp = onRoof(R.range(-0.9, 0.9), R.range(-0.9, 0.9), 0.5, 0.5), ms = R.range(4, 11), mr = R.range(0, 6.283);
+    if (r > 0.7) masts.push([mp[0], top, mp[1], ms, mr, 1, 1]);
   }
   var mt = solidMat(U, '#8a7a62', { rib: 0, grain: 1, spines: 0, barkN: 20, barkPlate: 6 });
   var mh = solidMat(U, '#9a9a98', { rib: 0, grain: 0, spines: 0, body2: '#7d7d7b' });
