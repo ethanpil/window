@@ -2231,9 +2231,11 @@ var GLSL_COMMON = [
   'uniform sampler2D uShadowMap; uniform vec2 uShadowOrigin, uShadowScale;',
   /* outside the baked rectangle the edge texels would repeat to the horizon
      (clamp to edge), smearing one shadow into a stripe; fade to lit instead */
-  'float baked(vec2 xz){ vec2 uv = (xz - uShadowOrigin) * uShadowScale; float v = texture2D(uShadowMap, uv).r;',
+  /* .x sun (1 lit), .y sky seen (ambient occlusion: hollows, under things) */
+  'vec2 bakedRG(vec2 xz){ vec2 uv = (xz - uShadowOrigin) * uShadowScale; vec2 v = texture2D(uShadowMap, uv).rg;',
   '  vec2 e = smoothstep(vec2(0.0), vec2(0.02), uv) * (1.0 - smoothstep(vec2(0.98), vec2(1.0), uv));',
-  '  return mix(1.0, v, e.x * e.y); }',
+  '  return mix(vec2(1.0), v, e.x * e.y); }',
+  'float baked(vec2 xz){ return bakedRG(xz).x; }',
   /* Clear air thins light by Beer-Lambert, a straight exponential: a far hill
      is paler, not gone. Mist and falling rain or snow close in as a wall, which
      the old squared exponent drew well, so each weather blends the two
@@ -2406,6 +2408,7 @@ function buildWorld(seed) {
 
   var scene = App.scene;
   App._shadows = [];
+  App._ao = null;
   App._features = [];
   App._cardMat = null;
   sizeWindow(P, window.innerWidth / window.innerHeight);
@@ -3262,9 +3265,10 @@ function buildTerrain(scene, P, R, U, H) {
       '  c = mix(c, uRock * 0.92, smoothstep(0.45, 0.78, slope) * 0.75);',
       '  c = mix(c, uHigh, smoothstep(uSnowLine, uSnowLine + 34.0, vW.y) * (1.0 - smoothstep(0.30, 0.62, slope)));',
       '  c = mix(c, c * 0.60, smoothstep(uWaterY + 1.1, uWaterY + 0.05, vW.y) * uWet);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vW.xz, uTime)) * mix(0.03, 1.0, baked(vW.xz));',
+      '  vec2 bk = bakedRG(vW.xz);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vW.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       '  float diff = max(dot(N2, normalize(uSunDir)), 0.0);',
-      '  vec3 light = hemi(N2, uAmbCol * 1.15) + uSunCol * diff * 1.25 * sh;',
+      '  vec3 light = bk.y * hemi(N2, uAmbCol * 1.15) + uSunCol * diff * 1.25 * sh;',
       '  vec3 lit = c * light;',
       '  float up = smoothstep(0.55, 0.95, vN.y);',
       /* a thin fall lies in the hollows first; a deep one covers everything */
@@ -3563,11 +3567,12 @@ function buildGrass(scene, P, R, U, H) {
       '  vec3 Ng = normalize(vec3(-s, 0.62, c) + vec3(uWindDir.x, 0.0, uWindDir.y) * gustBend * 1.6);',
       '  float sheen = pow(max(dot(reflect(-sd, Ng), normalize(cameraPosition - wp)), 0.0), 12.0) * 0.20 * yN * (1.0 - far);',
       '  float ao = mix(0.42, 1.0, smoothstep(0.0, 0.55, yN));',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, baked(wp.xz));',
+      '  vec2 bk = bakedRG(wp.xz);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       '  vec3 col = mix(uBase, uTip, clamp(yN * 1.05, 0.0, 1.0));',
       '  col = mix(col, uDry, smoothstep(0.55, 1.0, iAttr.w) * 0.45);',
       '  col *= 0.78 + 0.44 * iAttr.w;',
-      '  vec3 lit = col * (hemi(N, uAmbCol * 1.15) + uSunCol * (diff * 1.15 + trans + sheen) * sh) * ao;',
+      '  vec3 lit = col * (bk.y * hemi(N, uAmbCol * 1.15) + uSunCol * (diff * 1.15 + trans + sheen) * sh) * ao;',
       /* one steady colour for the far field: no per-blade variation left to alias */
       '  vec3 mass = mix(uBase, uTip, 0.62) * (uAmbCol * 1.15 + uSunCol * 0.70 * sh) * 0.94;',
       '  lit = mix(lit, mass, far);',
@@ -3699,8 +3704,9 @@ function buildFlowers(scene, P, R, U, H) {
         '  float vi = mod(iVar.x, 4.0); float flip = step(3.5, iVar.x);',
         '  float ux = mix(uv.x, 1.0 - uv.x, flip);',
         '  vUv = vec2((vi + ux) * 0.25, uv.y);',
-        '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, baked(wp.xz));',
-        '  vTint = uAmbCol * 0.85 + uSunCol * 0.75 * sh;',
+        '  vec2 bk = bakedRG(wp.xz);',
+        '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
+        '  vTint = uAmbCol * 0.85 * bk.y + uSunCol * 0.75 * sh;',
         '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
         '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
         '  gl_Position = projectionMatrix * mv;',
@@ -3955,7 +3961,8 @@ function solidMat(U, colour, opts) {
       '  vec3 wp = iPos + vec3(lp.x * c - lp.z * s, lp.y, lp.x * s + lp.z * c);',
       '  vec3 n = normalize(vec3(nl.x * c - nl.z * s, nl.y, nl.x * s + nl.z * c));',
       '  float diff = max(dot(n, normalize(uSunDir)), 0.0);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, baked(wp.xz));',
+      '  vec2 bk = bakedRG(wp.xz);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       /* contact darkening at the foot, in metres, so a house and a cactus get
          the same thin band instead of a third of their height. It is the sky
          that the ground hides, so it dims the ambient only, never the sun. */
@@ -3964,7 +3971,7 @@ function solidMat(U, colour, opts) {
          came out evenly lit: a trunk read as a flat plank. Sky above, the
          ground's bounce below: a shaded side is lit cool from the sky, an
          underside dimly by the ground, and no sun reaches round the back. */
-      '  vCol = uBody * (hemi(n, uAmbCol * 1.1) * ao + uSunCol * diff * 1.15 * sh);',
+      '  vCol = uBody * (hemi(n, uAmbCol * 1.1) * ao * mix(1.0, bk.y, 0.6) + uSunCol * diff * 1.15 * sh);',
       '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  float fH = fogAmtH(-mv.z, uFogDensity, wp.y);',
@@ -4327,8 +4334,9 @@ function cityMesh(scene, P, R, U, items) {
          instead of a fixed shade per world axis */
       '  vec3 sd = normalize(uSunDir);',
       '  float diff = max(dot(vN, sd), 0.0);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vW.xz, uTime)) * mix(0.03, 1.0, baked(vW.xz));',
-      '  vec3 c = uWall * (hemi(vN, uAmbCol * 1.15) + uSunCol * diff * 1.05 * sh);',
+      '  vec2 bk = bakedRG(vW.xz);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vW.xz, uTime)) * mix(0.03, 1.0, bk.x);',
+      '  vec3 c = uWall * (hemi(vN, uAmbCol * 1.15) * mix(1.0, bk.y, 0.5) + uSunCol * diff * 1.05 * sh);',
       /* pick the two axes that run across whichever face we are on */
       '  vec2 face = abs(vN.y) > 0.5 ? vL.xz : (abs(vN.x) > 0.5 ? vL.zy : vL.xy);',
       '  vec2 span = abs(vN.y) > 0.5 ? vSize.xz : (abs(vN.x) > 0.5 ? vSize.zy : vSize.xy);',
@@ -4423,6 +4431,9 @@ function bakeShadows(P, H, sunDir) {
       lit[idx] = Math.min(lit[idx], 1 - sh);
     }
   }
+  /* ambient occlusion does not move with the sun: worked out once per world */
+  if (!App._ao || App._ao.length !== N * N) App._ao = bakeAO(N, hg, sx, sz, casters);
+  var ao = App._ao;
   /* soften once */
   var out = new Uint8Array(N * N * 4);
   for (j = 0; j < N; j++) for (i = 0; i < N; i++) {
@@ -4434,7 +4445,7 @@ function bakeShadows(P, H, sunDir) {
     }
     var v = Math.round((acc / cnt) * 255);
     var o = (j * N + i) * 4;
-    out[o] = v; out[o + 1] = v; out[o + 2] = v; out[o + 3] = 255;
+    out[o] = v; out[o + 1] = Math.round(ao[j * N + i] * 255); out[o + 2] = v; out[o + 3] = 255;
   }
   var tex = new THREE.DataTexture(out, N, N, THREE.RGBAFormat);
   tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
@@ -4442,6 +4453,38 @@ function bakeShadows(P, H, sunDir) {
   tex.flipY = false;
   tex.needsUpdate = true;
   return tex;
+}
+
+/* How much of the sky each texel of ground can see, for the shadow map's G
+   channel: hollows (the ground below its own blurred surroundings) see less of
+   it, and the ground under anything standing on it less still. */
+function bakeAO(N, hg, sx, sz, casters) {
+  var R = 6, W = 2 * R + 1, i, j, k;
+  var tmp = new Float32Array(N * N), bl = new Float32Array(N * N), ao = new Float32Array(N * N);
+  /* separable box blur, edges clamped */
+  for (j = 0; j < N; j++) for (i = 0; i < N; i++) {
+    var acc = 0;
+    for (k = -R; k <= R; k++) acc += hg[j * N + Math.min(N - 1, Math.max(0, i + k))];
+    tmp[j * N + i] = acc / W;
+  }
+  for (j = 0; j < N; j++) for (i = 0; i < N; i++) {
+    var acc2 = 0;
+    for (k = -R; k <= R; k++) acc2 += tmp[Math.min(N - 1, Math.max(0, j + k)) * N + i];
+    bl[j * N + i] = acc2 / W;
+  }
+  for (k = 0; k < N * N; k++) ao[k] = 1 - 0.45 * smoothstep(0.2, 3.0, bl[k] - hg[k]);
+  /* a soft disc of contact shadow under every caster, wider than its crown */
+  for (k = 0; k < casters.length; k++) {
+    var c = casters[k], rr = Math.max(c[3], 0.6) * 1.5, str = 0.4 * (c[4] == null ? 1 : Math.min(c[4], 1));
+    var i0 = Math.max(0, ((c[0] - rr - SHADOW.x0) / sx) | 0), i1 = Math.min(N - 1, ((c[0] + rr - SHADOW.x0) / sx) | 0);
+    var j0 = Math.max(0, ((c[2] - rr - SHADOW.z0) / sz) | 0), j1 = Math.min(N - 1, ((c[2] + rr - SHADOW.z0) / sz) | 0);
+    for (j = j0; j <= j1; j++) for (i = i0; i <= i1; i++) {
+      var dx = SHADOW.x0 + (i + 0.5) * sx - c[0], dz = SHADOW.z0 + (j + 0.5) * sz - c[2];
+      var t = 1 - Math.sqrt(dx * dx + dz * dz) / rr;
+      if (t > 0) ao[j * N + i] *= 1 - str * t * t;
+    }
+  }
+  return ao;
 }
 
 function applyShadowMap(tex) {
@@ -4707,9 +4750,10 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
       '  lp.xz += uWindDir * sway * uWind * (0.3 + 0.7 * uGust) * size * 0.07;',
       '  vec3 wp = iPos + vec3(0.0, size * 0.5, 0.0) + lp;',
       '  vec3 sd = normalize(uSunDir);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, baked(wp.xz));',
+      '  vec2 bk = bakedRG(wp.xz);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       '  float back = pow(max(dot(-toCam, sd), 0.0), 3.0) * 0.45;',
-      '  vTint = (hemi(vec3(0.0, 0.4, 0.0), uAmbCol) + uSunCol * (0.75 + back) * sh) * shade * (1.0 - uSnow * 0.2);',
+      '  vTint = (hemi(vec3(0.0, 0.4, 0.0), uAmbCol) * mix(1.0, bk.y, 0.5) + uSunCol * (0.75 + back) * sh) * shade * (1.0 - uSnow * 0.2);',
       '  vUv = uv;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
@@ -6002,9 +6046,10 @@ function propBillboardMat(U, map, sway, aspect) {
       '  float sway = sin(uTime * 0.8 + iAttr.y) * 0.5 + sin(uTime * 0.33 + iAttr.y * 1.6) * 0.5;',
       '  lp.xz += uWindDir * sway * uWind * (0.3 + 0.7 * uGust) * size * uSway * position.y * position.y;',
       '  vec3 wp = iPos + lp;',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, baked(wp.xz));',
+      '  vec2 bk = bakedRG(wp.xz);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       '  float back = pow(max(dot(-toCam, normalize(uSunDir)), 0.0), 3.0) * 0.35;',
-      '  vTint = (hemi(vec3(0.0, mix(-0.2, 0.9, position.y), 0.0), uAmbCol * 0.9) + uSunCol * (0.6 + back) * sh) * (1.0 - uSnow * 0.25);',
+      '  vTint = (hemi(vec3(0.0, mix(-0.2, 0.9, position.y), 0.0), uAmbCol * 0.9) * mix(1.0, bk.y, 0.5) + uSunCol * (0.6 + back) * sh) * (1.0 - uSnow * 0.25);',
       '  vUv = uv;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
@@ -6178,8 +6223,9 @@ function buildHerd(scene, P, R, U, H) {
       '  vec2 q = vec2(pp.x * lc - pp.y * ls, pp.x * ls + pp.y * lc);',
       '  vec3 lp = right * q.x * size * 1.15 + vec3(0.0, q.y * size, 0.0);',
       '  vec3 p = wp + lp;',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, baked(wp.xz));',
-      '  vTint = hemi(vec3(0.0, mix(-0.4, 0.8, position.y), 0.0), uAmbCol * 1.05) + uSunCol * 0.8 * sh;',
+      '  vec2 bk = bakedRG(wp.xz);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
+      '  vTint = bk.y * hemi(vec3(0.0, mix(-0.4, 0.8, position.y), 0.0), uAmbCol * 1.05) + uSunCol * 0.8 * sh;',
       '  vUv = uv;',
       '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
       '  vFog = fogAmtH(-mv.z, uFogDensity, p.y);',
@@ -6871,9 +6917,10 @@ function buildClutter(scene, P, R, U, H) {
         '  float keep = (1.0 - smoothstep(11.0, 18.0, dN)) * (1.0 - smoothstep(0.15, 0.45, uSnow));',
         '  vec3 lp = vec3(position.x * c - position.z * s, 0.0, position.x * s + position.z * c) * sc * keep;',
         '  vec3 wp = iPos + lp;',
-        '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, baked(wp.xz));',
+        '  vec2 bk = bakedRG(wp.xz);',
+        '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
         '  float diff = max(uSunDir.y, 0.0);',
-        '  vec3 L = uAmbCol * 1.1 + uSunCol * diff * 1.15 * sh;',
+        '  vec3 L = uAmbCol * 1.1 * bk.y + uSunCol * diff * 1.15 * sh;',
         '  vTint = mix(L, uSnowCol * L * 0.82, uSnow * 0.8);',
         '  vUv = uv;',
         '  vNear = 1.0;',
@@ -6949,9 +6996,10 @@ function propMat(U, P, R, kind, swayMul, far) {
         '  lp.xz += uWindDir * sway * uWind * (0.35 + 0.75 * uGust) * position.y * position.y * size * uSway;',
         '  vec3 wp = iPos + lp;',
         '  vUv = uv;',
-        '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, baked(wp.xz));',
+        '  vec2 bk = bakedRG(wp.xz);',
+        '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
         '  float back = pow(max(dot(-toCam, normalize(uSunDir)), 0.0), 3.0) * 0.35;',
-        '  vTint = (hemi(vec3(0.0, mix(-0.2, 0.9, position.y), 0.0), uAmbCol * 0.9) + uSunCol * (0.6 + back) * sh) * (1.0 - uSnow * 0.25);',
+        '  vTint = (hemi(vec3(0.0, mix(-0.2, 0.9, position.y), 0.0), uAmbCol * 0.9) * mix(1.0, bk.y, 0.5) + uSunCol * (0.6 + back) * sh) * (1.0 - uSnow * 0.25);',
         '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
         '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
         '  vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, vFog);',
