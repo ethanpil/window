@@ -4378,12 +4378,13 @@ function buildCacti(scene, P, R, U, H, spec) {
   for (var ki = 0; ki < kinds.length; ki++) pairs.push([kinds[ki], CACTI[kinds[ki]].w]);
   var buckets = {};
   var guard = 0, placed = 0;
+  var lim = scatterLim(P);
   while (placed < spec.count && guard < spec.count * 60) {
     guard++;
-    var a = R.range(-1.22, 1.22);
+    var a = R.range(-lim, lim);
     var rr = spec.r[0] + Math.pow(R.f(), 1.35) * (spec.r[1] - spec.r[0]);
     var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
-    if (!plantable(P, H, x, z)) continue;
+    if (!plantable(P, H, x, z, 0.4)) continue;
     var kind = R.weighted(pairs);
     var sz = R.range(spec.size[0], spec.size[1]) * ({ saguaro: 1, ocotillo: 0.72, barrel: 0.15, pear: 0.30, agave: 0.28, cholla: 0.30 }[kind] || 0.3);
     (buckets[kind] = buckets[kind] || []).push([x, z, sz, R.range(0.85, 1.15)]);
@@ -4763,6 +4764,7 @@ function buildRocks(scene, P, R, U, H, spec) {
   var mat = solidMat(U, P.rockCol, { rib: 0, grain: 2, body2: '#' + second.getHexString(), lichen: lichen });
   var kinds = ['boulder', 'boulder', 'block', 'slab', 'shard'];
   var per = Math.ceil(spec.count / kinds.length);
+  var lim = scatterLim(P);
   for (var t = 0; t < kinds.length; t++) {
     var tpl = rockTemplate(R, kinds[t]), items = [], guard = 0;
     /* The size in the biome spec was multiplying a template that is itself
@@ -4774,10 +4776,10 @@ function buildRocks(scene, P, R, U, H, spec) {
     var tplH = Math.max(tpl.boundingBox.max.y - tpl.boundingBox.min.y, 0.01);
     while (items.length < per && guard < per * 40) {
       guard++;
-      var a = R.range(-1.22, 1.22);
+      var a = R.range(-lim, lim);
       var rr = spec.r[0] + Math.pow(R.f(), 1.35) * (spec.r[1] - spec.r[0]);
       var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
-      if (!plantable(P, H, x, z)) continue;
+      if (!plantable(P, H, x, z, 0.6)) continue;
       /* mostly modest, now and then a boulder the size of a car */
       var big = R.f() < 0.10;
       var want = R.range(spec.size[0], spec.size[1]) * 0.62 * (big ? R.range(1.35, 1.8) : 1);
@@ -6195,6 +6197,8 @@ function buildBoundaries(scene, P, R, U, H) {
       if (P.waterY != null && H(x, z) < P.waterY + 0.3) continue;
       if (P.pathKind && onPathAt(P, x, z) > 0.4) continue;
       if (P.clearKind && clearAt(P, x, z + 1.5) > 0) continue;
+      /* nobody fences a cliff: a line stops where the ground gets steep */
+      if (slopeAt(H, x, z) > 0.55) continue;
       var y = H(x, z);
       var jx = x + R.gauss() * 0.12, jz = z + R.gauss() * 0.12;
       if (kind === 'fence') {
@@ -7272,8 +7276,84 @@ function clearAt(P, x, z) {
   return smoothstep(edge - k[1], edge + k[1], z);
 }
 
-function plantable(P, H, x, z) {
+/* How far round to plant. Only about 36 degrees either side can be seen
+   through the glass, and things were spread evenly over 70, so most of every
+   count stood behind the wall. A margin is kept for the bare view, a wider
+   screen and the parallax of a moving head; the world is not rebuilt when
+   the window is resized, so never narrower than about 50 degrees. */
+function scatterLim(P) { return clamp(visibleHalfAngle(P) * 1.3, 0.9, 1.22); }
+
+/* gradient of the ground, rise over run, from the drawn surface */
+function slopeAt(H, x, z) {
+  var e = 1.5;
+  return Math.sqrt(Math.pow(H(x + e, z) - H(x - e, z), 2) + Math.pow(H(x, z + e) - H(x, z - e), 2)) / (2 * e);
+}
+
+/* How each kind grows when it is not planted in rows. Trees stand in copses
+   (n members spread sigma metres about a centre) drawn to hollows and water;
+   bushes in small clumps; creosote spaces itself out, each plant's roots
+   claiming the ground around it, so it is laid down by dart throwing with a
+   minimum gap of space times its size. maxSlope is rise over run. */
+var SCATTER = {
+  broadleaf: { n: [3, 15], sigma: [8, 25], wet: 1, maxSlope: 0.65 },
+  pine:      { n: [4, 15], sigma: [8, 22], wet: 0.5, maxSlope: 0.75 },
+  acacia:    { n: [1, 4], sigma: [6, 16], wet: 0.5, maxSlope: 0.5 },
+  palm:      { n: [2, 7], sigma: [4, 11], wet: 1, maxSlope: 0.45 },
+  shrub:     { n: [2, 6], sigma: [2, 5], wet: 0.5, maxSlope: 0.45 },
+  deadbush:  { n: [1, 3], sigma: [2, 4], wet: 0, maxSlope: 0.45 },
+  brittlebush: { n: [2, 8], sigma: [1.5, 4], wet: 0, maxSlope: 0.4 },
+  creosote:  { space: 2.6, maxSlope: 0.4 }
+};
+function scatterGroups(P, H, spec, grow, lim, S) {
+  var items = [], guard = 0, r0 = spec.r[0], r1 = spec.r[1];
+  var fits = function (x, z, sz, gap) {
+    var a = Math.atan2(x, -z), r = Math.sqrt(x * x + z * z);
+    if (Math.abs(a) > lim || r < r0 * 0.7 || r > r1 * 1.1) return false;
+    if (!plantable(P, H, x, z, grow.maxSlope)) return false;
+    if ((spec.kind === 'pine' || spec.kind === 'broadleaf') && P.snowLine != null
+        && H(x, z) > P.snowLine * S.range(0.6, 0.95)) return false;
+    for (var k = 0; k < items.length; k++) {
+      var dx = items[k][0] - x, dz = items[k][1] - z, need = (items[k][2] + sz) * gap;
+      if (dx * dx + dz * dz < need * need) return false;
+    }
+    return true;
+  };
+  var polar = function () {
+    var a = S.range(-lim, lim), rr = r0 + Math.pow(S.f(), 1.35) * (r1 - r0);
+    return [Math.sin(a) * rr, -Math.cos(a) * rr];
+  };
+  if (grow.space) {
+    while (items.length < spec.count && guard < spec.count * 60) {
+      guard++;
+      var q = polar(), sz = S.range(spec.size[0], spec.size[1]);
+      if (fits(q[0], q[1], sz, grow.space * 0.5)) items.push([q[0], q[1], sz]);
+    }
+    return items;
+  }
+  while (items.length < spec.count && guard < spec.count * 12) {
+    guard++;
+    var c = polar();
+    /* a copse would rather stand in a hollow, or by water, than on a rise */
+    var hc = H(c[0], c[1]);
+    var hollow = (H(c[0] + 25, c[1]) + H(c[0] - 25, c[1]) + H(c[0], c[1] + 25) + H(c[0], c[1] - 25)) * 0.25 - hc;
+    var wet = P.waterY != null ? 1 - smoothstep(1.0, 6.0, hc - P.waterY) : 0;
+    if (S.f() > 0.45 + clamp(hollow * 0.25, -0.3, 0.4) + wet * 0.5 * grow.wet) continue;
+    var n = S.int(grow.n[0], grow.n[1]), sig = S.range(grow.sigma[0], grow.sigma[1]);
+    var base = S.range(spec.size[0], spec.size[1]);
+    for (var m = 0; m < n * 3 && n > 0 && items.length < spec.count; m++) {
+      var x = c[0] + S.gauss() * sig, z = c[1] + S.gauss() * sig;
+      var sz = clamp(base * S.range(0.78, 1.18), spec.size[0], spec.size[1]);
+      if (!fits(x, z, sz, 0.32)) continue;
+      items.push([x, z, sz]);
+      n--;
+    }
+  }
+  return items;
+}
+
+function plantable(P, H, x, z, maxSlope) {
   if (P.waterY != null && H(x, z) < P.waterY + 0.25) return false;
+  if (maxSlope && slopeAt(H, x, z) > maxSlope) return false;
   if (P.clearKind && clearAt(P, x, z + 0.6) > 0) return false;
   if (P.pathKind && onPathAt(P, x, z) > 0.55) return false;
   /* nothing grows up between the wheel ruts big enough to stop a tractor */
@@ -7334,6 +7414,7 @@ function propMat(U, P, R, kind, swayMul, far) {
 
 function buildProps(scene, P, R, U, H) {
   App.propMeshes = [];
+  var lim = scatterLim(P);
   var specs = P.props.slice();
   if (P.treeline) {
     specs.push({ kind: P.treelineKind, count: R.int(26, 60), size: [9, 18],
@@ -7351,24 +7432,30 @@ function buildProps(scene, P, R, U, H) {
     var items = [];
     var guard = 0;
     var lineR = spec.line ? R.range(spec.r[0], spec.r[1]) : 0;
-    while (items.length < spec.count && guard < spec.count * 60) {
-      guard++;
-      var a = R.range(-1.22, 1.22);
-      var rr = spec.line ? lineR * R.range(0.85, 1.3)
-                         : spec.r[0] + Math.pow(R.f(), 1.35) * (spec.r[1] - spec.r[0]);
-      var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
-      if (spec.rows && P.rowSpacing) {
-        var A3 = P.rowAngle, sp3 = P.rowSpacing * (spec.rowMul || 1);
-        var pp3 = x * Math.cos(A3) + z * Math.sin(A3);
-        var sn3 = Math.round(pp3 / sp3) * sp3;
-        x += (sn3 - pp3) * Math.cos(A3);
-        z += (sn3 - pp3) * Math.sin(A3);
+    var grow = SCATTER[spec.kind];
+    if (spec.line || spec.rows || !grow) {
+      while (items.length < spec.count && guard < spec.count * 60) {
+        guard++;
+        var a = R.range(-lim, lim);
+        var rr = spec.line ? lineR * R.range(0.85, 1.3)
+                           : spec.r[0] + Math.pow(R.f(), 1.35) * (spec.r[1] - spec.r[0]);
+        var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
+        if (spec.rows && P.rowSpacing) {
+          var A3 = P.rowAngle, sp3 = P.rowSpacing * (spec.rowMul || 1);
+          var pp3 = x * Math.cos(A3) + z * Math.sin(A3);
+          var sn3 = Math.round(pp3 / sp3) * sp3;
+          x += (sn3 - pp3) * Math.cos(A3);
+          z += (sn3 - pp3) * Math.sin(A3);
+        }
+        if (!plantable(P, H, x, z, spec.line ? 0 : 0.65)) continue;
+        /* pines and broadleaves stop at the snow line */
+        if ((spec.kind === 'pine' || spec.kind === 'broadleaf') && P.snowLine != null
+            && H(x, z) > P.snowLine * R.range(0.6, 0.95)) continue;
+        items.push([x, z, R.range(spec.size[0], spec.size[1])]);
       }
-      if (!plantable(P, H, x, z)) continue;
-      /* pines and broadleaves stop at the snow line */
-      if ((spec.kind === 'pine' || spec.kind === 'broadleaf') && P.snowLine != null
-          && H(x, z) > P.snowLine * R.range(0.6, 0.95)) continue;
-      items.push([x, z, R.range(spec.size[0], spec.size[1])]);
+    } else {
+      items = scatterGroups(P, H, spec, grow, lim,
+        RNG(P.base + '/build/scatter/' + si + spec.kind + (P.nonce ? '/' + P.nonce : '')));
     }
     if (!items.length) continue;
 
@@ -7392,7 +7479,10 @@ function buildProps(scene, P, R, U, H) {
     var iAttr = new Float32Array(items.length * 2);
     for (var i = 0; i < items.length; i++) {
       iPos[i * 3] = items[i][0];
-      iPos[i * 3 + 1] = H(items[i][0], items[i][1]) - items[i][2] * (spec.line ? 0.09 : 0.03) + (spec.lift || 0) * items[i][2];
+      /* on a slope the card's downhill corner would stand on air: sink it by
+         the drop across its own half-width */
+      iPos[i * 3 + 1] = H(items[i][0], items[i][1]) - items[i][2] * (spec.line ? 0.09 : 0.03) + (spec.lift || 0) * items[i][2]
+        - slopeAt(H, items[i][0], items[i][1]) * items[i][2] * spriteAspect(spec.kind) * 0.5;
       iPos[i * 3 + 2] = items[i][1];
       iAttr[i * 2] = items[i][2];
       iAttr[i * 2 + 1] = R.range(0, 6.283);
