@@ -6055,8 +6055,9 @@ var NEAR = { x0: -32, x1: 32, z0: -66, z1: -2 };
    darkening lit. The ray from a texel up toward the sun passes within the
    radius of the segment: both are projected along the light onto the level
    of the caster's foot, where the capsule's round section becomes an ellipse
-   stretched down-sun. wide: no narrower than this, paler by as much (a
-   coarse map would otherwise lose a thin shadow between its texel centres);
+   stretched down-sun. wide: no narrower than this, and paler (a coarse map
+   would otherwise lose a thin shadow between its texel centres; twice its
+   true share of the texel, as the coarse map's soften spreads it again);
    wt(x, z), if given: how much of the shadow this map carries there. */
 function dropCapsules(lit, hg, N, M, sunDir, caps, wide, wt) {
   var sx = (M.x1 - M.x0) / N, sz = (M.z1 - M.z0) / N, b = wide ? 0 : 1, i, j, k;
@@ -6064,7 +6065,7 @@ function dropCapsules(lit, hg, N, M, sunDir, caps, wide, wt) {
   if (dy <= 0.04 || !caps.length) return;
   var ux = dx / hl, uz = dz / hl, sinE = dy;
   for (k = 0; k < caps.length; k++) {
-    var c = caps[k], yb = Math.min(c[1], c[4]), r = Math.max(c[6], wide), str = c[7] * c[6] / r;
+    var c = caps[k], yb = Math.min(c[1], c[4]), r = Math.max(c[6], wide), str = c[7] * Math.min(1, 2 * c[6] / r);
     var low = c[1] <= c[4] ? 0 : 1;
     /* along the light down to the foot's level: x' = x - d.x (y - yb) / d.y */
     var ax = c[0] - dx * (c[1] - yb) / dy, az = c[2] - dz * (c[1] - yb) / dy;
@@ -6208,7 +6209,7 @@ function bakeShadows(P, H, sunDir) {
   var tanE = Math.max(dy, 0.12) / hl;
   for (k = 0; k < casters.length; k++) {
     var c = casters[k];
-    if (c[6]) continue;                 /* drawn in the near map; here only for AO */
+    if (c[6]) continue;                 /* drawn as capsules (below); here only for AO */
     var r = c[3], hgt = c[5] || r * 3, str = c[4] == null ? 1 : c[4];
     str *= 1 - 0.65 * smoothstep(90, 220, Math.sqrt(c[0] * c[0] + c[2] * c[2]));
     var reach = Math.min(hgt * 0.62 / tanE, 80);
@@ -6230,6 +6231,12 @@ function bakeShadows(P, H, sunDir) {
       lit[idx] = Math.min(lit[idx], 1 - sh);
     }
   }
+  /* The near casters' shadows belong to the near map, but a low sun throws
+     them past its edge: there the same capsules are dropped here too,
+     widened to this map's texels, so the shadow runs on instead of ending. */
+  dropCapsules(lit, hc, N, SHADOW, sunDir, App._casters || [], 0.6 * sx, function (x, z) {
+    return x <= NEAR.x0 || x >= NEAR.x1 || z <= NEAR.z0 || z >= NEAR.z1 ? 1 : 0;
+  });
   /* the box footprints are whole texels, so the shadow's edge up a wall
      or across a roof came out in stairs: soften the heights once */
   if (city) {
