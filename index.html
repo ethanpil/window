@@ -5477,7 +5477,7 @@ function buildCacti(scene, P, R, U, H, spec) {
     else {
       App._shadows.push([x, gy, z, sz * 0.3, 1.0, sz, nr]);
       var CK = { barrel: [0.25, 0.6, 0.95], pear: [0.3, 0.5, 0.8], agave: [0.3, 0.32, 0.85], ocotillo: [0.16, 0.95, 0.35], cholla: [0.25, 0.45, 0.65] }[kind];
-      if (nr && CK) App._casters.push([x, gy, z, x, gy + sz * CK[1], z, sz * CK[0], CK[2]]);
+      if (nr && CK) App._casters.push([x, gy, z, x, gy + sz * CK[1], z, sz * CK[0], CK[2], 1]);
     }
     placed++;
   }
@@ -5518,7 +5518,7 @@ function buildCacti(scene, P, R, U, H, spec) {
           for (var ci = 0; ci < caps.length; ci++) {
             var cp = caps[ci];
             App._casters.push([m0[0] + cp[0] * mc - cp[2] * ms, m0[1] + cp[1] * m0[5], m0[2] + cp[0] * ms + cp[2] * mc,
-                               m0[0] + cp[3] * mc - cp[5] * ms, m0[1] + cp[4] * m0[5], m0[2] + cp[3] * ms + cp[5] * mc, cp[6], 1]);
+                               m0[0] + cp[3] * mc - cp[5] * ms, m0[1] + cp[4] * m0[5], m0[2] + cp[3] * ms + cp[5] * mc, cp[6], 1, 1]);
           }
         }
       }
@@ -6050,7 +6050,7 @@ function cityMesh(scene, P, R, U, items) {
    the sun onto the same map. Nothing per frame but a texture read. */
 var SHADOW = { x0: -300, x1: 300, z0: -600, z1: 30 };
 var NEAR = { x0: -32, x1: 32, z0: -66, z1: -2 };
-/* Drop capsules ([x0, y0, z0, x1, y1, z1, radius, strength]) along the
+/* Drop capsules ([x0, y0, z0, x1, y1, z1, radius, strength, stem]) along the
    light onto a map of N texels a side over rect M with ground heights hg,
    darkening lit. The ray from a texel up toward the sun passes within the
    radius of the segment: both are projected along the light onto the level
@@ -6080,11 +6080,13 @@ function dropCapsules(lit, hg, N, M, sunDir, caps, wide, wt) {
       var wx = tx + dx * (yb - gy) / dy, wz = tz + dz * (yb - gy) / dy;
       var t = ll > 1e-8 ? clamp(((wx - ax) * lx + (wz - az) * lz) / ll, 0, 1) : low;
       var qx = wx - (ax + lx * t), qz = wz - (az + lz * t);
-      /* A trunk does not shade its own sunlit side. The map is read at a
-         surface's ground position, so the round cap of the shadow at the
-         foot, up-sun of it, and the foot's own section (never seen) are the
-         trunk itself: leave them lit, or the filtering darkens its face. */
-      if (yb - gy < r + 0.5) {
+      /* A stem (a cactus's trunk; stem 1) does not shade its own sunlit
+         side. The map is read at a surface's ground position, so the round
+         cap of the shadow at the foot, up-sun of it, and the foot's own
+         section (never seen) are the stem itself: leave them lit, or the
+         filtering darkens its face. A bush's mass hangs over the ground
+         under it, which it does shade. */
+      if (c[8] && yb - gy < r + 0.5) {
         var fx = wx - (low ? bx : ax), fz = wz - (low ? bz : az);
         if ((t === low && qx * ux + qz * uz > 0) || fx * fx + fz * fz < c[6] * c[6]) continue;
       }
