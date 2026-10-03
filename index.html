@@ -8999,8 +8999,15 @@ function makeCritterTexture(kind) {
 }
 
 function buildCritters(scene, P, R, U, H) {
-  if (!P.biome.critters || P.weather.rain > 0.3 || P.timeA === 'night') return;
-  var kinds = [['lizard', R.int(1, 3)], ['scorpion', R.chance(0.6) ? 1 : 0]];
+  /* Lizards bask by day; scorpions hunt by night and hide from the sun. At
+     night there were no critters at all (and none of the builder's stream
+     is drawn then, so the night's scorpions come from a stream of their
+     own); by day the scorpions' draws are still taken, and nothing built. */
+  if (!P.biome.critters || P.weather.rain > 0.3) return;
+  var dark = P.timeA === 'night';
+  if (dark && !/desert|canyon|oasis/.test(P.biomeKey)) return;
+  if (dark) R = RNG(P.base + '/build/critters/night' + (P.nonce ? '/' + P.nonce : ''));
+  var kinds = dark ? [['scorpion', R.int(1, 3)]] : [['lizard', R.int(1, 3)], ['scorpion', R.chance(0.6) ? 1 : 0]];
   for (var ki = 0; ki < kinds.length; ki++) {
     var kind = kinds[ki][0], n = kinds[ki][1];
     if (!n) continue;
@@ -9019,6 +9026,7 @@ function buildCritters(scene, P, R, U, H) {
       var da = R.range(0, 6.283), dl = kind === 'lizard' ? R.range(0.5, 1.2) : R.range(0.25, 0.5);
       iDart[i * 3] = Math.cos(da) * dl; iDart[i * 3 + 1] = da; iDart[i * 3 + 2] = Math.sin(da) * dl;
     }
+    if (kind === 'scorpion' && !dark) { quad.dispose(); geo.dispose(); continue; }
     geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
     geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 4));
     geo.setAttribute('iDart', new THREE.InstancedBufferAttribute(iDart, 3));
