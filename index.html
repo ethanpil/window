@@ -494,9 +494,11 @@ var STUBBLE_PALETTES = [
   { name: 'late harvest', base: '#a89552', tip: '#cdb877', soil: '#7e6a40', dry: '#dbc78d' },
   { name: 'baled gold', base: '#c1ad6c', tip: '#e2d296', soil: '#907a4c', dry: '#eadfae' }
 ];
+/* an oasis is sand like the desert round it; only what grows by the water
+   is green (cb, ct) */
 var OASIS_PALETTES = [
-  { name: 'palm shade', base: '#4e6b34', tip: '#87a352', soil: '#a58a5e', dry: '#c8ab74' },
-  { name: 'date grove', base: '#456030', tip: '#7c964b', soil: '#9c8258', dry: '#c1a26c' }
+  { name: 'palm shade', base: '#c6a676', tip: '#e0c59a', soil: '#a58a5e', dry: '#d6bb8c', cb: '#4e6b34', ct: '#87a352' },
+  { name: 'date grove', base: '#be9e6e', tip: '#d9be92', soil: '#9c8258', dry: '#cfb284', cb: '#456030', ct: '#7c964b' }
 ];
 var CASCADE_PALETTES = [
   { name: 'wet stone', base: '#3c4a3a', tip: '#6d8256', soil: '#4a4a44', dry: '#7d7f6c' },
@@ -1043,7 +1045,7 @@ function buildParams(seedStr, nonce) {
      grows, not sand and rock: in the arid palettes the ground fields stay
      as drawn (all four in sand/dust/salt; soil and dry where base/tip are
      the grass), and only the plant colours take the tint. */
-  var sandG = { coast: 1, desert: 1, canyon: 1, saltflat: 1 }[P.biomeKey] ? 0 : 1;
+  var sandG = { coast: 1, desert: 1, canyon: 1, saltflat: 1, oasis: 1 }[P.biomeKey] ? 0 : 1;
   var soilG = { coast: 1, desert: 1, canyon: 1, saltflat: 1, oasis: 1, savanna: 1 }[P.biomeKey] ? 0 : 1;
   P.grass = {
     name: P.grass.name, base: seasonHex(P.grass.base, SEA, sandG),
@@ -1454,6 +1456,8 @@ function buildParams(seedStr, nonce) {
     }
     P.flowerReach = 44;
   }
+  /* no meadow flowers on the sand round an oasis (the draws are taken) */
+  if (P.biomeKey === 'oasis') P.flowerCount = 0;
 
   /* what grows or sits on the land */
   P.props = [];
@@ -1551,7 +1555,7 @@ function buildParams(seedStr, nonce) {
     urban: [0.5, 7, 16], meadow: [0.3, 3.2, 5.0], hayfield: [0.3, 3.2, 5.0], savanna: [0.45, 3.4, 5.6],
     lavender: [0.5, 3.4, 5.4], orchard: [0.35, 3.2, 5.0], blossom: [0.35, 3.2, 5.0], autumn: [0.3, 3.2, 5.0],
     alpine: [0.35, 3.2, 5.6], bridge: [0.3, 3.2, 5.0], fjord: [0.35, 3.2, 5.6], cascade: [0.3, 3.2, 5.0],
-    moor: [0.25, 3.2, 5.0], tundra: [0.2, 3.2, 4.6], coast: [0.3, 3.2, 5.0], oasis: [0.3, 3.2, 5.0],
+    moor: [0.25, 3.2, 5.0], tundra: [0.2, 3.2, 4.6], coast: [0.3, 3.2, 5.0], oasis: [0.55, 3.2, 5.6],
     desert: [0.2, 3.2, 4.6], canyon: [0.6, 3.4, 7.0]
   }[P.biomeKey] || [0, 0, 0];
   var upper = E.f() < EYE[0], eyeH = E.range(EYE[1], EYE[2]);
@@ -3241,8 +3245,12 @@ function makeHeightField(P) {
     };
   }
   if (kind === 'oasis') {
-    /* dunes all around, a hollow with water in the middle of them */
-    var ow = P.oasisW, ox2 = P.oasisX, oz2 = P.oasisZ;
+    /* Dunes all around, a hollow with water in the middle of them. The
+       house stands on the sand and the land falls away from it toward the
+       hollow along the line of sight, the dunes kept low across that line,
+       so the water is in view; a rim of blown sand stands only on the far
+       side. Near the house the ground is level, so the window is above it. */
+    var ow = P.oasisW, ox2 = P.oasisX, oz2 = P.oasisZ, oL2 = ox2 * ox2 + oz2 * oz2, oL = Math.sqrt(oL2);
     return function (x, z) {
       var d = Math.sqrt(x * x + z * z);
       var od = Math.sqrt((x - ox2) * (x - ox2) + (z - oz2) * (z - oz2));
@@ -3250,10 +3258,14 @@ function makeHeightField(P) {
       /* the dunes must not fill the hollow, or the oasis has no water in it:
          they are flattened out as the bowl deepens */
       var open = 1 - bowl;
-      var h = ridged(x * 0.011, z * 0.011, s, 4) * amp * 2.4 * smoothstep(8, 70, d) * open;
-      h += fbm2(x * 0.035, z * 0.035, s + 11, 3) * 0.9 * open;
+      var tq = clamp((x * ox2 + z * oz2) / oL2, 0, 1), qx = ox2 * tq - x, qz = oz2 * tq - z;
+      var lane = 1 - smoothstep(ow * 0.5, ow * 1.9, Math.sqrt(qx * qx + qz * qz));
+      var h = ridged(x * 0.011, z * 0.011, s, 4) * amp * 2.4 * smoothstep(8, 70, d) * open * (1 - 0.85 * lane);
+      h += fbm2(x * 0.035, z * 0.035, s + 11, 3) * 0.9 * open * smoothstep(4, 30, d);
+      h -= lane * smoothstep(0.03, 0.7, tq) * 4.5 * open;
       h -= bowl * 9.0;
-      h += smoothstep(ow * 1.1, ow * 2.4, od) * (1 - smoothstep(ow * 4.0, ow * 9.0, od)) * 2.2;
+      var away = ((x - ox2) * -ox2 + (z - oz2) * -oz2) / (Math.max(od, 1) * oL);
+      h += smoothstep(ow * 1.1, ow * 2.4, od) * (1 - smoothstep(ow * 4.0, ow * 9.0, od)) * 2.2 * (1 - smoothstep(-0.3, 0.3, away));
       h += Math.pow(ridged(x * 0.004, z * 0.004, s + 41, 3), 1.3) * far * 1.5 * smoothstep(260, 820, d);
       return h;
     };
@@ -3590,6 +3602,9 @@ function buildTerrain(scene, P, R, U, H) {
     uDryC: { value: new THREE.Color(P.grass.dry) },
     uWoodCol: { value: new THREE.Color(P.leafDark || '#2c3a24').multiplyScalar(0.75 * (P.treeTint || 1)) },
     uCoverMinY: { value: P.waterY != null ? P.waterY + Math.max(P.coverMinH || -1, P.coverWet ? -0.30 : 0.25) : -1e6 },
+    /* at an oasis things grow only near the water: the green stops a few
+       metres above it (lo, hi), and the sand round about stays sand */
+    uPlantY: { value: TKt === 'oasis' ? new THREE.Vector2(P.waterY + 1.0, P.waterY + 4.5) : new THREE.Vector2(1e6, 2e6) },
     uCamPos: U.uCamPos,
     uRock: { value: new THREE.Color(P.rockCol) },
     uHigh: { value: new THREE.Color(P.highCol) },
@@ -3679,7 +3694,7 @@ function buildTerrain(scene, P, R, U, H) {
     fragmentShader: [
       GLSL_TONE,
       'uniform sampler2D uTex; uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uSnowCol, uTip;',
-      'uniform vec3 uRock, uHigh, uCoverCol, uDryC, uWoodCol; uniform float uCoverK, uCoverMinY, uCoverNear, uPatch;',
+      'uniform vec3 uRock, uHigh, uCoverCol, uDryC, uWoodCol; uniform float uCoverK, uCoverMinY, uCoverNear, uPatch; uniform vec2 uPlantY;',
       'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uBeach, uSwash, uPaddy, uStepH, uRowSp, uPuddle;',
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uFloorY, uBedY[16], uBedH[16]; uniform vec3 uBedC[16];',
@@ -3774,7 +3789,7 @@ function buildTerrain(scene, P, R, U, H) {
          shrinking away, so there is no seam */
       '  float dC = length(uCamPos - vW);',
       '  float handover = smoothstep(11.0, 34.0, dC);',
-      '  float grows = uCoverK * smoothstep(uCoverMinY - 0.2, uCoverMinY + 0.3, vW.y);',
+      '  float grows = uCoverK * smoothstep(uCoverMinY - 0.2, uCoverMinY + 0.3, vW.y) * (1.0 - smoothstep(uPlantY.x, uPlantY.y, vW.y + 6.0 * (c2.g - cM.g)));',
       '  c = mix(c, uCoverCol * (0.72 + 0.5 * c.g), max(handover * 0.62, uCoverNear) * grows);',
       /* Past the blades the field is still alive: where a gust lays the grass
          over, the paler undersides and tips catch the light at a glancing
@@ -4418,6 +4433,8 @@ function buildGrass(scene, P, R, U, H) {
     if (Math.abs(Math.atan2(x, -z)) > 1.30) return 0;
     if (P.pathKind && onPathAt(P, x, z) > GR.f() * 0.55) return 0;
     if (P.erg && duneAt(P.dune, x, z) > P.dune.hd * 0.18) return 0;
+    /* an oasis grows by its water; on the sand round it, a rare tussock */
+    if (P.oasisW && H(x, z) > P.waterY + 4.5 && GR.f() > 0.02) return 0;
     var hm = 1;
     /* the kept ground under the window: mown short, or nothing grows on it */
     if (P.clearKind) {
@@ -6704,7 +6721,7 @@ var LANDMARKS = {
   house:      { biomes: ['moor', 'meadow', 'farmland', 'autumn', 'hayfield', 'lavender', 'river', 'tundra'], scale: [7, 10], body: '#a2988a', trim: '#5f544a' },
   smokestack: { biomes: ['moor', 'farmland', 'urban', 'hayfield', 'river', 'marsh'], scale: [16, 26], body: '#8a5a44', trim: '#6b4636', smoke: [0, 0.95] },
   silo:       { biomes: ['farmland', 'orchard'], scale: [9, 14], body: '#b9b3a4', trim: '#8a857a' },
-  cabin:      { biomes: ['alpine', 'lakefront', 'river', 'autumn', 'tundra', 'marsh', 'oasis'], scale: [5, 8], body: '#6b543c', trim: '#4a3a2a', smoke: [-0.24, 0.82] },
+  cabin:      { biomes: ['alpine', 'lakefront', 'river', 'autumn', 'tundra', 'marsh'], scale: [5, 8], body: '#6b543c', trim: '#4a3a2a', smoke: [-0.24, 0.82] },
   pagoda:     { biomes: ['terraces'], scale: [8, 13], body: '#7d4a3a', trim: '#3f3630' },
   watertank:  { biomes: ['desert', 'saltflat', 'savanna', 'farmland', 'hayfield'], scale: [8, 12], body: '#9aa0a2', trim: '#6f7476' },
   jetty:      { biomes: ['lakefront', 'coast', 'marsh', 'river'], scale: [6, 9], body: '#6a5a45', trim: '#4e4235' }
@@ -8934,7 +8951,7 @@ function makeSprayTexture(kind, P, R) {
   return tex(c, false);
 }
 
-var CLUTTER_GRAVEL = { desert: 1, canyon: 1, saltflat: 1, coast: 1 };
+var CLUTTER_GRAVEL = { desert: 1, canyon: 1, saltflat: 1, coast: 1, oasis: 1 };
 function makeClutterTexture(kind, P, R) {
   var S = 128, c = cnv(S, S), g = c.getContext('2d');
   var rgb = function (col) {
@@ -9058,7 +9075,7 @@ function buildClutter(scene, P, R, U, H) {
     }
     /* a sand sea is sand: a stone here and there, no more (thinned after
        the fact, so the builder's stream is drawn as before) */
-    if (P.erg) items = items.filter(function (it) { return ihash(Math.round(it[0] * 10), Math.round(it[2] * 10), 77) < 0.15; });
+    if (P.erg || P.oasisW) items = items.filter(function (it) { return ihash(Math.round(it[0] * 10), Math.round(it[2] * 10), 77) < (P.erg ? 0.15 : 0.3); });
     if (!items.length) continue;
     var iPos = new Float32Array(items.length * 3);
     var iAttr = new Float32Array(items.length * 2);
@@ -9338,6 +9355,24 @@ function buildProps(scene, P, R, U, H) {
   if (P.treeline) {
     specs.push({ kind: P.treelineKind, count: R.int(26, 60), size: [9, 18],
                  r: [150, 430], line: true });
+  }
+  /* An oasis's palms and bushes stand round its water, P.palmCount of the
+     palms, from the shore out to where the ground water gives out; none out
+     on the dunes. Its own stream. */
+  if (P.oasisW) {
+    var OR = RNG(P.base + '/build/oasis' + (P.nonce ? '/' + P.nonce : ''));
+    for (var os = 0; os < specs.length; os++) {
+      var osp = specs[os];
+      if (osp.kind !== 'palm' && osp.kind !== 'shrub') continue;
+      var want = osp.kind === 'palm' ? P.palmCount : osp.count, ring = [];
+      for (var og = 0; og < want * 40 && ring.length < want; og++) {
+        var oa = OR.range(0, 6.283), orr = P.oasisW * (osp.kind === 'palm' ? OR.range(0.7, 1.45) : OR.range(0.6, 1.9));
+        var ox = P.oasisX + Math.cos(oa) * orr, oz = P.oasisZ + Math.sin(oa) * orr;
+        if (Math.abs(Math.atan2(ox, -oz)) > lim || !plantable(P, H, ox, oz, 0.45) || H(ox, oz) > P.waterY + 5.5) continue;
+        ring.push([ox, oz, OR.range(osp.size[0], osp.size[1])]);
+      }
+      specs[os] = { kind: osp.kind, count: ring.length, size: osp.size, r: osp.r, seed: osp.seed, preset: ring };
+    }
   }
   /* A river through dry country is lined with green: willow and tamarisk
      thickets along both banks of the channel, nothing beyond. Its own
