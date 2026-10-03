@@ -2062,6 +2062,13 @@ function makePropTexture(kind, P, R, opts) {
   return tex(c, false);
 }
 
+/* Card width as a fraction of its height. The sprites are drawn to their
+   true proportions on a square canvas, so most kinds want a square card; a
+   fixed narrow card squeezed every tree and bush into a column. Conifers stay
+   a little narrower than drawn, and an acacia's crown spreads wider. */
+var SPRITE_ASPECT = { pine: 0.72, acacia: 1.4, creosote: 0.85, cactus: 0.62 };
+function spriteAspect(kind) { return SPRITE_ASPECT[kind] || 1.0; }
+
 function makeBirdTexture() {
   var S = 64, c = cnv(S, S), g = c.getContext('2d');
   g.strokeStyle = 'rgba(30,32,36,0.9)';
@@ -5664,7 +5671,7 @@ function boundaryBillboards(scene, P, R, U, H, items, kind) {
   geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
   geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 2));
   geo.instanceCount = items.length;
-  var mat = propBillboardMat(U, makePropTexture(kind, P, R, { far: true }), kind === 'hedge' ? 0.02 : 0.03);
+  var mat = propBillboardMat(U, makePropTexture(kind, P, R, { far: true }), kind === 'hedge' ? 0.02 : 0.03, spriteAspect(kind));
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
   scene.add(m);
@@ -5672,7 +5679,7 @@ function boundaryBillboards(scene, P, R, U, H, items, kind) {
 }
 
 /* a plain lit billboard, for things that only need to stand there and sway */
-function propBillboardMat(U, map, sway) {
+function propBillboardMat(U, map, sway, aspect) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime, uWind: U.uWind, uGust: U.uGust, uWindDir: U.uWindDir,
@@ -5680,12 +5687,12 @@ function propBillboardMat(U, map, sway) {
       uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow,
       uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale,
       uSnow: U.uSnow, uCamPos: U.uCamPos,
-      uMap: { value: map }, uSway: { value: sway }
+      uMap: { value: map }, uSway: { value: sway }, uAspect: { value: aspect || 1.0 }
     },
     alphaTest: 0.25, side: THREE.DoubleSide,
     vertexShader: [
       'attribute vec3 iPos; attribute vec2 iAttr;',
-      'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uSway;',
+      'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uSway, uAspect;',
       'uniform vec2 uWindDir; uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
       'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
       GLSL_COMMON,
@@ -5693,7 +5700,7 @@ function propBillboardMat(U, map, sway) {
       '  float size = iAttr.x;',
       '  vec3 toCam = normalize(vec3(uCamPos.x - iPos.x, 0.0, uCamPos.z - iPos.z));',
       '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 lp = right * position.x * size * 0.85 + vec3(0.0, position.y * size, 0.0);',
+      '  vec3 lp = right * position.x * size * uAspect + vec3(0.0, position.y * size, 0.0);',
       '  float sway = sin(uTime * 0.8 + iAttr.y) * 0.5 + sin(uTime * 0.33 + iAttr.y * 1.6) * 0.5;',
       '  lp.xz += uWindDir * sway * uWind * (0.3 + 0.7 * uGust) * size * uSway * position.y * position.y;',
       '  vec3 wp = iPos + lp;',
@@ -6498,14 +6505,14 @@ function propMat(U, P, R, kind, swayMul, far) {
         uTime: U.uTime, uWind: U.uWind, uGust: U.uGust, uWindDir: U.uWindDir,
         uSunCol: U.uSunCol, uAmbCol: U.uAmbCol, uFogCol: U.uFogCol, uSunDir: U.uSunDir,
         uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow, uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale, uSnow: U.uSnow,
-        uCamPos: U.uCamPos, uSway: { value: swayMul },
+        uCamPos: U.uCamPos, uSway: { value: swayMul }, uAspect: { value: spriteAspect(kind) },
         uMap: { value: makePropTexture(kind, P, R, { far: !!far }) }
       },
       alphaToCoverage: true, alphaTest: 0.4,
       side: THREE.DoubleSide,
       vertexShader: [
         'attribute vec3 iPos; attribute vec2 iAttr;',
-        'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uSway;',
+        'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uSway, uAspect;',
         'uniform vec2 uWindDir; uniform vec3 uCamPos, uSunCol, uAmbCol, uFogCol, uSunDir;',
         'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
         GLSL_COMMON,
@@ -6513,7 +6520,7 @@ function propMat(U, P, R, kind, swayMul, far) {
         '  float size = iAttr.x;',
         '  vec3 toCam = normalize(vec3(uCamPos.x - iPos.x, 0.0, uCamPos.z - iPos.z));',
         '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-        '  vec3 lp = right * position.x * size * 0.62 + vec3(0.0, position.y * size, 0.0);',
+        '  vec3 lp = right * position.x * size * uAspect + vec3(0.0, position.y * size, 0.0);',
         '  float sway = sin(uTime * 0.62 + iAttr.y) * 0.5 + sin(uTime * 0.27 + iAttr.y * 2.1) * 0.5;',
         '  lp.xz += uWindDir * sway * uWind * (0.35 + 0.75 * uGust) * position.y * position.y * size * uSway;',
         '  vec3 wp = iPos + lp;',
