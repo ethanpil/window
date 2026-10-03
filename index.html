@@ -5256,37 +5256,77 @@ function bridgeGeo(P, R, H) {
   /* parapets, the length of the road */
   pushBox(B, 0, th * 0.5 + 0.5, deckW * 0.5 - 0.3, roadHalf, 0.5, 0.22, 0);
   pushBox(B, 0, th * 0.5 + 0.5, -deckW * 0.5 + 0.3, roadHalf, 0.5, 0.22, 0);
+  /* the ground under the bridge line, in the deck's own frame */
+  var gAt = function (x) { return H(x, P.bridgeZ) - P.bridgeDeck; };
+  /* a straight member from (x0,y0) to (x1,y1) at z: a box laid along it */
+  var strut = function (x0, y0, x1, y1, z, hy, hz) {
+    var dx = x1 - x0, dy = y1 - y0;
+    pushBox(B, (x0 + x1) * 0.5, (y0 + y1) * 0.5, z, Math.sqrt(dx * dx + dy * dy) * 0.5 + hy * 0.5, hy, hz, 0, Math.atan2(dy, dx));
+  };
   if (kind === 'suspension') {
     var towH = drop * R.range(0.42, 0.72), tx = span * R.range(0.20, 0.30);
     for (i = -1; i <= 1; i += 2) {
-      for (var sgn = -1; sgn <= 1; sgn += 2) pushBox(B, i * tx, towH * 0.5, sgn * (deckW * 0.5 - 0.8), 1.1, towH * 0.5, 1.1, 0);
+      /* the legs go all the way down, to the river or the gorge side */
+      var legBot = Math.max(-drop, gAt(i * tx)) - 1.5;
+      for (var sgn = -1; sgn <= 1; sgn += 2) pushBox(B, i * tx, (towH + legBot) * 0.5, sgn * (deckW * 0.5 - 0.8), 1.1, (towH - legBot) * 0.5, 1.1, 0);
       pushBox(B, i * tx, towH - 1.2, 0, 1.4, 0.7, deckW * 0.5, 0);
+      pushBox(B, i * tx, -th * 0.5 - 0.9, 0, 1.2, 0.6, deckW * 0.5, 0);      /* the cross-beam under the deck */
     }
-    /* main cable as a chain of short segments following a catenary */
+    /* The main cable hangs between the tower tops and dips to just above the
+       deck at mid-span; past each tower a backstay runs down to an anchorage
+       at the abutment. It used to be one cosh curve over the whole span, which
+       peaks at the ends: the cable stood up in the middle and drooped onto
+       the towers, upside down. */
+    var cTop = towH - 0.4, cLow = th * 0.5 + 1.6, anchorX = span * 0.5 + 6;
+    var cableY = function (x) {
+      var ax2 = Math.abs(x);
+      if (ax2 <= tx) { var u = ax2 / tx; return cLow + (cTop - cLow) * u * u; }
+      var v = (ax2 - tx) / (anchorX - tx);                         /* the backstay, a slight sag */
+      return cTop + (0.4 - cTop) * v - 0.06 * (cTop - 0.4) * Math.sin(v * Math.PI);
+    };
     for (var sgn2 = -1; sgn2 <= 1; sgn2 += 2) {
       var zc = sgn2 * (deckW * 0.5 - 0.8);
-      for (i = 0; i < 40; i++) {
-        var t0 = i / 40 * 2 - 1, t1 = (i + 1) / 40 * 2 - 1;
-        var cy0 = towH * (Math.cosh(t0 * 1.9) / Math.cosh(1.9)) * 0.92 + 1.2;
-        var cy1 = towH * (Math.cosh(t1 * 1.9) / Math.cosh(1.9)) * 0.92 + 1.2;
-        var mx = (t0 + t1) * 0.5 * span * 0.5, my = (cy0 + cy1) * 0.5;
-        var len = Math.sqrt(Math.pow((t1 - t0) * span * 0.5, 2) + Math.pow(cy1 - cy0, 2)) * 0.5;
-        pushBox(B, mx, my, zc, len, 0.18, 0.18, 0);
-        if (i % 3 === 0 && Math.abs(t0) < 0.98) pushBox(B, mx, (my + th) * 0.5, zc, 0.09, (my - th) * 0.5, 0.09, 0);
+      /* nodes: anchorage to tower, tower to tower, tower to anchorage, so
+         there is always a node exactly on each tower top */
+      var xs2 = [], q2;
+      for (q2 = 0; q2 < 8; q2++) xs2.push(-anchorX + (anchorX - tx) * q2 / 8);
+      for (q2 = 0; q2 < 32; q2++) xs2.push(-tx + 2 * tx * q2 / 32);
+      for (q2 = 0; q2 <= 8; q2++) xs2.push(tx + (anchorX - tx) * q2 / 8);
+      for (i = 0; i < xs2.length - 1; i++) {
+        var x0 = xs2[i], x1 = xs2[i + 1];
+        strut(x0, cableY(x0), x1, cableY(x1), zc, 0.2, 0.2);
+        var hx = (x0 + x1) * 0.5, hy2 = cableY(hx);
+        if (i % 2 === 0 && hy2 > th * 0.5 + 0.4) pushBox(B, hx, (hy2 + th * 0.5) * 0.5, zc, 0.08, (hy2 - th * 0.5) * 0.5, 0.08, 0);
       }
+      for (i = -1; i <= 1; i += 2) pushBox(B, i * anchorX, 0.2, zc, 2.0, 1.2, 1.4, 0);   /* anchor blocks */
     }
   } else if (kind === 'arch') {
+    /* A steel arch springs from low on the gorge walls and rises to its crown
+       just under the deck, which stands on columns from it. It used to hang
+       below the deck like a hammock. Find where each wall reaches the
+       springing level. */
+    var ySpr = Math.max(-drop * 0.78, -drop + 2.0), yCrown = -th * 0.5 - 1.2;
+    var spr = [0, 0];
+    for (var sd2 = 0; sd2 < 2; sd2++) {
+      var dir = sd2 ? 1 : -1, xs = span * 0.42;
+      for (var st = 1; st <= 60; st++) {
+        var xt = dir * span * 0.5 * st / 60;
+        if (gAt(xt) >= ySpr) { xs = Math.abs(xt); break; }
+      }
+      spr[sd2] = dir * (xs + 1.0);                       /* a little into the rock */
+    }
+    var archY = function (t) { var u = 2 * t - 1; return ySpr + (yCrown - ySpr) * (1 - u * u); };
     for (var sgn3 = -1; sgn3 <= 1; sgn3 += 2) {
       var za = sgn3 * (deckW * 0.5 - 1.0);
       for (i = 0; i < 30; i++) {
         var a0 = i / 30, a1 = (i + 1) / 30;
-        var ay0 = -drop * 0.72 * (1 - Math.pow(a0 * 2 - 1, 2) * 1.0) - 0.5;
-        var ay1 = -drop * 0.72 * (1 - Math.pow(a1 * 2 - 1, 2) * 1.0) - 0.5;
-        var ax = (a0 + a1 - 1) * span * 0.42, ay = (ay0 + ay1) * 0.5;
-        var al = Math.sqrt(Math.pow((a1 - a0) * span * 0.84, 2) + Math.pow(ay1 - ay0, 2)) * 0.5;
-        pushBox(B, ax, ay, za, al, 0.55, 0.5, 0);
-        if (i % 4 === 0) pushBox(B, ax, ay * 0.5, za, 0.30, Math.abs(ay) * 0.5, 0.30, 0);
+        var ax0 = spr[0] + (spr[1] - spr[0]) * a0, ax1 = spr[0] + (spr[1] - spr[0]) * a1;
+        strut(ax0, archY(a0), ax1, archY(a1), za, 0.55, 0.5);
+        var amx = (ax0 + ax1) * 0.5, amy = (archY(a0) + archY(a1)) * 0.5;
+        if (i % 3 === 1 && amy < yCrown - 1.0) pushBox(B, amx, (amy - th * 0.5) * 0.5, za, 0.30, (-th * 0.5 - amy) * 0.5, 0.30, 0);
       }
+      /* bracing between the two ribs at the crown and the quarters */
+      if (sgn3 > 0) for (i = 1; i < 6; i++) { var bt = i / 6; pushBox(B, spr[0] + (spr[1] - spr[0]) * bt, archY(bt), 0, 0.3, 0.3, deckW * 0.5 - 1.0, 0); }
     }
   } else if (kind === 'stone') {
     /* Round arches carried on piers. The voussoirs were axis-aligned boxes set
