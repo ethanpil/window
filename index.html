@@ -2265,13 +2265,18 @@ var GLSL_COMMON = [
   /* Ambient from a sky above and the lit ground below, by which way a surface
      faces: an underside sees the ground's bounce, a top sees the sky. */
   'vec3 hemi(vec3 n, vec3 amb){ return mix(uGroundCol, amb, n.y * 0.5 + 0.5); }',
-  'const float SHADOW_WAVELENGTH = 0.0295;  // radians per metre',
-  'const float SHADOW_DRIFT = 0.082;        // radians per second',
+  /* Cloud shadows are the sky's own clouds: from a point on the ground, follow
+     the sun up to the deck (about 1000 m) and read the cloud texture there
+     with the sky's mapping, so a shadow lies under a cloud you can see. The
+     sky maps direction d to d.xz / d.y; a deck point is the same thing in
+     units of the deck height. uCloudShift = sun.xz / sun.y. Two fetches, no
+     branch; t is kept for the callers, the drift is in the offsets. */
+  'uniform sampler2D uSkyCloud; uniform float uSkyScale, uSkyCover, uSkySoft, uSkyOp;',
+  'uniform vec2 uSkyOff, uSkyOff2, uCloudShift;',
   'float cloudShade(vec2 p, float t){',
-  '  float v = sin(p.x*SHADOW_WAVELENGTH + t*SHADOW_DRIFT) * sin(p.y*0.0261 - t*0.067);',
-  '  v += 0.62 * sin(p.x*0.0121 - t*0.044 + 1.7) * sin(p.y*0.0178 + t*0.037);',
-  '  v += 0.30 * sin((p.x+p.y)*0.0071 + t*0.025 - 0.4);',
-  '  return smoothstep(-0.34, 0.62, v);',
+  '  vec2 uv = ((p - cameraPosition.xz) / 1000.0 + uCloudShift) * uSkyScale;',
+  '  float n = texture2D(uSkyCloud, uv * 0.55 + uSkyOff).r * 0.58 + texture2D(uSkyCloud, uv * 1.37 + uSkyOff2).r * 0.42;',
+  '  return 1.0 - smoothstep(uSkyCover, uSkyCover + uSkySoft, n) * uSkyOp;',
   '}'
 ].join('\n');
 
@@ -2381,7 +2386,9 @@ function shareCommon(scene) {
   var U = App.U, S = App.skyU;
   var common = {
     uFogShape: U.uFogShape, uFogH: U.uFogH, uFogAway: U.uFogAway, uInScat: U.uInScat,
-    uGroundCol: U.uGroundCol, uHazeK: U.uHazeK
+    uGroundCol: U.uGroundCol, uHazeK: U.uHazeK,
+    uSkyCloud: S.uCloudTex, uSkyScale: S.uScale, uSkyCover: S.uCover, uSkySoft: S.uSoft,
+    uSkyOp: S.uCloudOp, uSkyOff: S.uOff1, uSkyOff2: S.uOff2, uCloudShift: U.uCloudShift
   };
   scene.traverse(function (o) {
     var m = o.material;
@@ -2444,6 +2451,7 @@ function buildWorld(seed) {
     uFogAway:   { value: new THREE.Color(0xc8d8e4) },
     uInScat:    { value: new THREE.Color(0xa8c0dc) },
     uGroundCol: { value: new THREE.Color(0x303428) },
+    uCloudShift: { value: new THREE.Vector2() },
     uShadowMap: { value: (function () {
       var t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
       t.needsUpdate = true; return t;
@@ -3187,7 +3195,6 @@ function buildTerrain(scene, P, R, U, H) {
       'float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
       '  return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + vec2(1.0)), f.x), f.y); }',
       'uniform vec3 uCamPos, uZenith, uHorizon, uCloudL, uCloudD;',
-      'uniform float uSkyScale, uSkyCover, uSkySoft; uniform vec2 uSkyOff; uniform sampler2D uSkyCloud;',
       'varying vec3 vW; varying vec3 vN; varying float vFog;',
       GLSL_COMMON,
       'void main(){',
@@ -3336,10 +3343,9 @@ function buildWater(scene, P, R, U) {
       GLSL_TONE,
       'uniform vec3 uDeep, uShallow, uSunDir, uSunCol, uAmbCol, uFogCol, uCamPos;',
       'uniform float uTime, uFogDensity, uShoreZ, uFoam, uChop, uSwell, uShadow, uFlowRate, uStreak;',
-      'uniform vec2 uFlowDir, uSkyOff;',
-      'uniform float uMirror, uSkyScale, uSkyCover, uSkySoft;',
+      'uniform vec2 uFlowDir;',
+      'uniform float uMirror;',
       'uniform vec3 uZenith, uHorizon, uCloudL, uCloudD;',
-      'uniform sampler2D uSkyCloud;',
       'varying vec3 vW;',
       GLSL_COMMON,
       'void main(){',
@@ -8076,6 +8082,8 @@ function updateWeather(t) {
   /* the skyline must always be there to look at */
   if (P.biomeKey === 'urban') U.uFogDensity.value = Math.min(U.uFogDensity.value, 0.0026);
   U.uShadow.value = W.shadow * (0.7 + 0.6 * (1 - mood)) * (1 - night * 0.85);
+  /* where the sun's ray from the ground meets the cloud deck, per deck height */
+  U.uCloudShift.value.set(sd.x, sd.z).divideScalar(Math.max(sd.y, 0.08));
 
   var S = App.skyU;
   mixHex(S.uZenith.value, A.zen, B.zen, k);
