@@ -6438,6 +6438,7 @@ function makeSprayTexture(kind, P, R) {
   return tex(c, false);
 }
 
+var CLUTTER_GRAVEL = { desert: 1, canyon: 1, saltflat: 1, coast: 1 };
 function makeClutterTexture(kind, P, R) {
   var S = 128, c = cnv(S, S), g = c.getContext('2d');
   var rgb = function (col) {
@@ -6475,11 +6476,23 @@ function makeClutterTexture(kind, P, R) {
         g.restore();
       }
     }
-  } else { /* tuft: a rosette of broad leaves seen from above */
-    var tc = new THREE.Color(P.grass.ct || P.grass.tip);
+  } else if (CLUTTER_GRAVEL[P.biomeKey]) {
+    /* nothing grows flat on sand or bare rock: small dark stones and grit */
+    var gc = new THREE.Color(P.rockCol).lerp(new THREE.Color(P.grass.soil), 0.35);
+    for (var gp = 0; gp < 40; gp++) {
+      var gx = R.range(0.1, 0.9) * S, gy = R.range(0.1, 0.9) * S, gw = S * R.range(0.012, 0.04);
+      var gcol = gc.clone().offsetHSL(0, R.range(-0.05, 0.03), R.range(-0.16, 0.04));
+      g.fillStyle = rgb(gcol);
+      g.beginPath(); g.ellipse(gx, gy, gw, gw * R.range(0.6, 0.95), R.range(0, 3.14), 0, 6.283); g.fill();
+    }
+  } else { /* tuft: a low rosette of leaves seen from above, darker than the
+              blade tips and a little see-through so it reads as a plant on the
+              ground rather than a pale blotch */
+    var tc = new THREE.Color(P.grass.cb || P.grass.base).lerp(new THREE.Color(P.grass.ct || P.grass.tip), 0.45);
+    g.globalAlpha = 0.82;
     for (var k = 0; k < 22; k++) {
       var a = R.f() * 6.283, len = S * R.range(0.14, 0.30);
-      g.fillStyle = rgb(tc.clone().offsetHSL(0, 0, R.range(-0.18, 0.10)));
+      g.fillStyle = rgb(tc.clone().offsetHSL(0, 0, R.range(-0.16, 0.04)));
       g.save(); g.translate(S / 2, S / 2); g.rotate(a);
       g.beginPath(); g.ellipse(len * 0.55, 0, len * 0.55, S * R.range(0.035, 0.06), 0, 0, 6.283); g.fill();
       g.restore();
@@ -6509,7 +6522,14 @@ function buildClutter(scene, P, R, U, H) {
       var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
       if (z > -0.9) continue;
       if (P.waterY != null && H(x, z) < P.waterY + 0.2) continue;
-      items.push([x, H(x, z) + 0.03, z, R.range(0.22, 0.85) * (kind === 'tufts' ? 1.5 : 1), R.range(0, 6.283)]);
+      /* a worn path is where nothing low grows */
+      if (kind === 'tufts' && P.pathKind && onPathAt(P, x, z) > 0.3) continue;
+      var csz = R.range(0.22, 0.85) * (kind === 'tufts' && !CLUTTER_GRAVEL[P.biomeKey] ? 1.5 : 1);
+      var crot = R.range(0, 6.283);
+      /* the stones are painted lit from the upper left of their card; turn
+         each card so that side faces the sun, with a little scatter */
+      if (kind === 'stones') crot = Math.atan2(-Math.cos(P.sunAz), Math.sin(P.sunAz)) - Math.atan2(-0.74, -0.67) + (crot - 3.14) * 0.11;
+      items.push([x, H(x, z) + 0.03, z, csz, crot]);
     }
     if (!items.length) continue;
     var iPos = new Float32Array(items.length * 3);
