@@ -5021,6 +5021,8 @@ function solidMat(U, colour, opts) {
       uBarkN: { value: opts.barkN || 18 },
       uBarkPlate: { value: opts.barkPlate || 5.0 },
       uLichen: { value: new THREE.Color(opts.lichen || '#8f9a3c') },
+      /* dry country: desert varnish and bedding instead of lichen */
+      uVarn: { value: opts.varnish ? 1 : 0 },
       uNodes: { value: opts.nodes || 0 },
       uGrain: { value: opts.facade ? 4 : (opts.grain || 0) },
       uSpin: { value: opts.spin || 0 },
@@ -5075,7 +5077,7 @@ function solidMat(U, colour, opts) {
     ].join('\n'),
     fragmentShader: [
       GLSL_TONE,
-      'uniform vec3 uSpine, uTipCol, uBody2, uLichen, uBody; uniform float uRib, uNodes, uGrain, uRibN, uSpines, uTipMix, uBarkN, uBarkPlate, uTwoTone;',
+      'uniform vec3 uSpine, uTipCol, uBody2, uLichen, uBody; uniform float uRib, uNodes, uGrain, uRibN, uSpines, uTipMix, uBarkN, uBarkPlate, uTwoTone, uVarn;',
       'uniform vec3 uSunDir, uSunCol; uniform float uShadow, uTime;',
       GLSL_COMMON,
       /* A computed pattern has no mip chain, so once its stripes are finer than
@@ -5230,8 +5232,20 @@ function solidMat(U, colour, opts) {
          so it read as yellow squares painted on the stone. Grow it on smooth
          noise at two scales instead, and thin the fine one with distance. */
       '    float lf = vn3(q * 3.4) * 0.66 + mix(0.5, vn3(q * 9.0), k9) * 0.34;',
+      '    if (uVarn > 0.5) {',
+      /* Dry rock is laid in beds, each its own shade with a darker parting
+         between, dipping a little; and its weathered skin is desert varnish,
+         a dark brown-black film in streaks and patches, missing from the
+         sand-blasted foot and from fresh breaks. Faded by footprint. */
+      '      float bv = (vMet.y + 0.12 * sin(vMet.x * 1.3 + vSeed) + 0.06 * sin(vMet.z * 2.1)) / 0.24;',
+      '      float kBd = 1.0 - smoothstep(0.30, 0.85, fwidth(bv));',
+      '      c *= 1.0 + (0.16 * (h3(vec3(floor(bv), vSeed, 5.0)) - 0.5) - 0.22 * smoothstep(0.80, 1.0, abs(fract(bv) - 0.5) * 2.0)) * kBd;',
+      '      float vm = smoothstep(0.42, 0.66, lf + 0.25 * vn3(vec3(vLocal.xz * 1.5, vLocal.y * 9.0) + vSeed)) * smoothstep(0.08, 0.45, vMet.y);',
+      '      c = mix(c, vec3(0.11, 0.075, 0.055) * (0.5 + 0.9 * length(litC) / max(length(uBody), 0.05)), vm * 0.55);',
+      '    } else {',
       '    float lich = smoothstep(0.54, 0.78, lf);',
       '    c = mix(c, uLichen * (0.4 + 0.6 * length(litC) / max(length(uBody), 0.05)), lich * upFace * 0.70);',
+      '    }',
       '  } else if (uGrain > 0.5) {',
       /* Bark is not a comb. This was a triangle wave at one fixed pitch with
          a slow wobble laid over it, every ridge the same width and the same
@@ -6055,7 +6069,7 @@ function applyShadowMap(tex) {
 
 
 /* ---------- rocks: displaced icosahedra ---------- */
-function rockTemplate(R, kind) {
+function rockTemplate(R, kind, blocky) {
   /* A boulder is rounded, a block is angular with a flat top, a slab lies
      long and low, a shard stands. Each vertex is pushed by its own noise, and
      the mesh is left unindexed so every face keeps its own flat normal. */
@@ -6076,8 +6090,15 @@ function rockTemplate(R, kind) {
     /* blocks have a flat top; shards lean */
     var yy = y * n * sy;
     if (kind === 'block' && yy > sy * 0.55) yy = sy * 0.55 + (yy - sy * 0.55) * 0.25;
-    var xx = x * n * sx + (kind === 'shard' ? yy * 0.25 : 0);
-    pos.setXYZ(i, xx, yy + sy * 0.55, z * n * sz);
+    var xx = x * n * sx + (kind === 'shard' ? yy * 0.25 : 0), zz = z * n * sz;
+    /* Dry rock breaks along its joints and beds into blocks: square the
+       sides off too, leaving the corners rounded by the weather */
+    if (blocky && kind !== 'boulder') {
+      var cap = function (v, m) { return Math.abs(v) > m ? (v < 0 ? -1 : 1) * (m + (Math.abs(v) - m) * 0.2) : v; };
+      xx = cap(xx, sx * 0.62); zz = cap(zz, sz * 0.62);
+      if (yy < -sy * 0.5) yy = -sy * 0.5 + (yy + sy * 0.5) * 0.3;
+    }
+    pos.setXYZ(i, xx, yy + sy * 0.55, zz);
   }
   geo.computeVertexNormals();
   var g2 = new THREE.BufferGeometry();
@@ -6091,12 +6112,13 @@ function buildRocks(scene, P, R, U, H, spec) {
   var rc = new THREE.Color(P.rockCol);
   var second = rc.clone().offsetHSL(R.range(-0.04, 0.04), R.range(-0.1, 0.1), R.range(-0.16, 0.14));
   var lichen = R.pick(['#8f9a3c', '#b8a23a', '#c8742e', '#7f9560', '#9aa15a']);
-  var mat = solidMat(U, P.rockCol, { rib: 0, grain: 2, body2: '#' + second.getHexString(), lichen: lichen });
-  var kinds = ['boulder', 'boulder', 'block', 'slab', 'shard'];
+  var dryRock = !!ARID[P.biomeKey] && P.biomeKey !== 'savanna';
+  var mat = solidMat(U, P.rockCol, { rib: 0, grain: 2, body2: '#' + second.getHexString(), lichen: lichen, varnish: dryRock });
+  var kinds = dryRock ? ['block', 'block', 'slab', 'block', 'boulder'] : ['boulder', 'boulder', 'block', 'slab', 'shard'];
   var per = Math.ceil(spec.count / kinds.length);
   var lim = scatterLim(P);
   for (var t = 0; t < kinds.length; t++) {
-    var tpl = rockTemplate(R, kinds[t]), items = [], guard = 0;
+    var tpl = rockTemplate(R, kinds[t], dryRock), items = [], guard = 0;
     /* The size in the biome spec was multiplying a template that is itself
        anywhere from 0.7 to 3.9 units tall, so the same number meant a boulder
        to one kind and a standing stone to another: a shard on the moor came
@@ -6125,6 +6147,32 @@ function buildRocks(scene, P, R, U, H, spec) {
     }
     if (items.length) instanceSolid(scene, tpl, items, mat);
   }
+  /* Talus: what a cliff sheds lies in a fan of blocks at its foot. Look for
+     ground that is still walkable with a cliff close above it, and heap a
+     few blocks there. A stream of its own, so nothing else moves. */
+  if (!dryRock) return;
+  var TS = RNG(P.base + '/build/talus' + (P.nonce ? '/' + P.nonce : ''));
+  var ttpl = rockTemplate(TS, 'block', true), tItems = [];
+  ttpl.computeBoundingBox();
+  var tH = Math.max(ttpl.boundingBox.max.y - ttpl.boundingBox.min.y, 0.01);
+  for (var tg = 0; tg < 900 && tItems.length < 160; tg++) {
+    var ta = TS.range(-lim, lim), tr = TS.range(20, 320);
+    var tx = Math.sin(ta) * tr, tz = -Math.cos(ta) * tr;
+    var s0 = slopeAt(H, tx, tz);
+    if (s0 > 0.55 || !plantable(P, H, tx, tz)) continue;
+    /* which way is uphill, and is there a cliff within ten metres of it? */
+    var gx = H(tx + 2, tz) - H(tx - 2, tz), gz = H(tx, tz + 2) - H(tx, tz - 2), gl = Math.sqrt(gx * gx + gz * gz);
+    if (gl < 1e-3) continue;
+    var ux = tx + gx / gl * 8, uz = tz + gz / gl * 8;
+    if (slopeAt(H, ux, uz) < 1.0) continue;
+    var nB = TS.int(3, 9);
+    for (var tb = 0; tb < nB; tb++) {
+      var bx = tx + TS.gauss() * 3, bz = tz + TS.gauss() * 3, bs = TS.range(0.25, 1.6) * (TS.f() < 0.12 ? 2 : 1) / tH;
+      if (!plantable(P, H, bx, bz)) continue;
+      tItems.push([bx, H(bx, bz) - bs * 0.3, bz, bs, TS.range(0, 6.283), TS.range(0.7, 1.1), TS.range(0.8, 1.3)]);
+    }
+  }
+  if (tItems.length) instanceSolid(scene, ttpl, tItems, mat);
 }
 
 /* ---------- near trees: a real trunk and branches, leaf cards for the crown ---------- */
