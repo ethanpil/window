@@ -4073,7 +4073,8 @@ function buildCity(scene, P, R, U, H) {
   if (P.cityFront === 'houses') {
     var hb = { pos: [], nor: [], idx: [], rib: [] };
     pushBox(hb, 0, 0.5, 0, 0.5, 0.5, 0.38, 0);
-    pushCone(hb, 0, 1.0, 0, 0.62, 0.42, 4);
+    pushGableEnds(hb, 0, 1.0, 0, 0.5, 0.38 + 0.06, 0.42 * 1.1);
+    pushGableRoof(hb, 0, 1.0, 0, 0.5, 0.38, 0.42 * 1.1, 0.06);
     pushBox(hb, -0.28, 1.32, 0.10, 0.07, 0.22, 0.07, 0);
     var htpl = finishGeo(hb);
     var hmat = solidMat(U, R.pick(['#c9b7a2', '#b8a894', '#cbbfae', '#a9917c']), { rib: 0, grain: 0, spines: 0, body2: '#7a5c48' });
@@ -4770,10 +4771,13 @@ function pushBox(B, cx, cy, cz, hx, hy, hz, rot, rz) {
     B.idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
   }
 }
-function pushCone(B, cx, cy, cz, r, h, seg, invert) {
+/* a0 turns the base polygon: a four-sided cone from angle 0 is a diamond whose
+   corners land on the wall faces; from pi/4 it is square to the walls */
+function pushCone(B, cx, cy, cz, r, h, seg, invert, a0) {
   var start = B.pos.length / 3, i;
+  a0 = a0 || 0;
   for (i = 0; i < seg; i++) {
-    var a = (i / seg) * 6.2832, a2 = ((i + 1) / seg) * 6.2832;
+    var a = a0 + (i / seg) * 6.2832, a2 = a0 + ((i + 1) / seg) * 6.2832;
     var x1 = Math.cos(a) * r, z1 = Math.sin(a) * r, x2 = Math.cos(a2) * r, z2 = Math.sin(a2) * r;
     var ny = r / Math.max(h, 0.001) * 0.5;
     B.pos.push(cx, cy + h, cz, cx + x1, cy, cz + z1, cx + x2, cy, cz + z2);
@@ -4781,6 +4785,50 @@ function pushCone(B, cx, cy, cz, r, h, seg, invert) {
     var o = start + i * 3;
     B.idx.push(o, o + 1, o + 2);
   }
+}
+/* One flat convex face, wound so it faces away from ref (a point inside the
+   solid): the roofs below are built from faces, and getting each winding
+   right by hand is how holes appear. */
+function pushFace(B, pts, ref) {
+  var a = pts[0], b = pts[1], c = pts[2];
+  var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  var flip = (a[0] - ref[0]) * nx + (a[1] - ref[1]) * ny + (a[2] - ref[2]) * nz < 0;
+  var nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1, sg = flip ? -1 : 1;
+  var start = B.pos.length / 3, k;
+  for (k = 0; k < pts.length; k++) { B.pos.push(pts[k][0], pts[k][1], pts[k][2]); B.nor.push(nx / nl * sg, ny / nl * sg, nz / nl * sg); B.rib.push(0); }
+  for (k = 1; k < pts.length - 1; k++) {
+    if (flip) B.idx.push(start, start + k + 1, start + k); else B.idx.push(start, start + k, start + k + 1);
+  }
+}
+/* A hipped roof over a hx by hz wall plate, eaves overhanging by o, every
+   slope the same pitch: the ridge runs along the longer side and stops short
+   of each end by the half-width. Closed underneath by a soffit, so the eaves
+   seen from below are not a hole into the sky. */
+function pushHipRoof(B, cx, cy, cz, hx, hz, h, o) {
+  var ex = hx + o, ez = hz + o, along = ex >= ez;
+  var L = along ? ex : ez, W = along ? ez : ex, rl = L - W;
+  var P = function (u, y, v) { return along ? [cx + u, cy + y, cz + v] : [cx + v, cy + y, cz + u]; };
+  var ref = [cx, cy + h * 0.3, cz];
+  pushFace(B, [P(-L, 0, W), P(L, 0, W), P(rl, h, 0), P(-rl, h, 0)], ref);
+  pushFace(B, [P(-L, 0, -W), P(L, 0, -W), P(rl, h, 0), P(-rl, h, 0)], ref);
+  pushFace(B, [P(L, 0, -W), P(L, 0, W), P(rl, h, 0)], ref);
+  pushFace(B, [P(-L, 0, -W), P(-L, 0, W), P(-rl, h, 0)], ref);
+  pushFace(B, [P(-L, 0, -W), P(L, 0, -W), P(L, 0, W), P(-L, 0, W)], ref);
+}
+/* A pitched roof with its ridge along x: two slopes and a soffit. The gable
+   ends are separate (pushGableEnds, given the roof's half-depth with its
+   eaves, so the triangle fills the roof's section) because they are wall. */
+function pushGableRoof(B, cx, cy, cz, hx, hz, h, o) {
+  var ex = hx + o, ez = hz + o, ref = [cx, cy + h * 0.3, cz];
+  pushFace(B, [[cx - ex, cy, cz + ez], [cx + ex, cy, cz + ez], [cx + ex, cy + h, cz], [cx - ex, cy + h, cz]], ref);
+  pushFace(B, [[cx - ex, cy, cz - ez], [cx + ex, cy, cz - ez], [cx + ex, cy + h, cz], [cx - ex, cy + h, cz]], ref);
+  pushFace(B, [[cx - ex, cy, cz - ez], [cx + ex, cy, cz - ez], [cx + ex, cy, cz + ez], [cx - ex, cy, cz + ez]], ref);
+}
+function pushGableEnds(B, cx, cy, cz, hx, hz, h) {
+  var ref = [cx, cy + h * 0.3, cz];
+  for (var sd = -1; sd <= 1; sd += 2)
+    pushFace(B, [[cx + sd * hx, cy, cz - hz], [cx + sd * hx, cy, cz + hz], [cx + sd * hx, cy + h, cz]], ref);
 }
 function pushCyl(B, cx, cy, cz, r0, r1, h, seg) {
   var start = B.pos.length / 3, i;
@@ -4836,6 +4884,7 @@ function landmarkGeo(kind, R) {
      one, which is what lets a roof sit on a wall of a different shade. */
   var trims = [];
   var mark = function (fn) { var a0 = B.rib.length; fn(); trims.push(a0, B.rib.length); };
+  var smokeAt = null;            /* where a chimney top actually is, if the shape knows */
   if (kind === 'lighthouse') {
     pushCyl(B, 0, 0, 0, 0.22, 0.13, 1.0, 16);
     pushCyl(B, 0, 1.0, 0, 0.17, 0.17, 0.10, 16);          /* gallery */
@@ -4879,9 +4928,14 @@ function landmarkGeo(kind, R) {
     /* the same barn every time, until now: its length, its pitch and whether
        it has a lean-to are all its own */
     var nw = R.range(0.46, 0.60), nd = R.range(0.28, 0.38), nh = R.range(0.22, 0.32);
+    var brise = R.range(0.24, 0.36);
     pushBox(B, 0, nh, 0, nw, nh, nd, 0);
-    mark(function () { pushCone(B, 0, nh * 2, 0, (nw + nd) * 0.70, R.range(0.24, 0.36), 4); });
-    pushBox(B, -nw * 0.62, nh * 2 + 0.14, 0, 0.05, 0.16, 0.05, 0);        /* chimney */
+    /* a gabled roof: a four-sided cone left its corners standing out of the walls */
+    pushGableEnds(B, 0, nh * 2, 0, nw, nd + 0.05, brise);
+    mark(function () { pushGableRoof(B, 0, nh * 2, 0, nw, nd, brise, 0.05); });
+    var chTop = nh * 2 + brise + 0.08;
+    pushBox(B, -nw * 0.62, chTop - 0.16, 0, 0.05, 0.16, 0.05, 0);        /* chimney */
+    smokeAt = [-nw * 0.62, chTop + 0.02];
     if (R.f() < 0.7) pushBox(B, nw + 0.20, nh * 0.58, 0.10, 0.18, nh * 0.58, nd * 0.6, 0);
   } else if (kind === 'house') {
     /* A house left to itself. The roof is two slopes over a stepped gable, so
@@ -4914,14 +4968,16 @@ function landmarkGeo(kind, R) {
     pushBox(B, 0.42, 0.20, 0, 0.22, 0.20, 0.26, 0);
   } else if (kind === 'cabin') {
     pushBox(B, 0, 0.26, 0, 0.42, 0.26, 0.32, 0);
-    pushCone(B, 0, 0.52, 0, 0.52, 0.26, 4);
+    pushGableEnds(B, 0, 0.52, 0, 0.42, 0.32 + 0.08, 0.26);
+    pushGableRoof(B, 0, 0.52, 0, 0.42, 0.32, 0.26, 0.08);
     pushBox(B, -0.24, 0.66, 0.10, 0.05, 0.16, 0.05, 0);
   } else if (kind === 'pagoda') {
     var tiers = 3 + R.int(0, 2);
     for (i = 0; i < tiers; i++) {
       var t = i / tiers, y = t * 0.86, w = 0.34 * (1 - t * 0.45);
       pushBox(B, 0, y + 0.09, 0, w * 0.72, 0.09, w * 0.72, 0);
-      pushCone(B, 0, y + 0.18, 0, w * 1.20, 0.12, 4);
+      /* square to the tier below, eaves well out past its walls */
+      pushCone(B, 0, y + 0.18, 0, w * 0.72 * 1.40 * Math.SQRT2, 0.12, 4, false, Math.PI / 4);
     }
     pushCyl(B, 0, 0.86, 0, 0.03, 0.01, 0.16, 6);
   } else if (kind === 'watertank') {
