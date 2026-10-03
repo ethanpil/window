@@ -3613,11 +3613,10 @@ function buildTerrain(scene, P, R, U, H) {
       '  float steep = smoothstep(0.17, 0.34, slope + (c2.g - cM.g) * 0.5);',
       '  float high = smoothstep(uRockLine - 8.0, uRockLine + 22.0, vW.y);',
       '  float rockW = max(steep * 0.92, high * (0.35 + 0.65 * smoothstep(0.08, 0.28, slope)));',
-      '  vec3 Na = abs(vN);',
-      /* stretched down the fall line (v small), so the side taps draw gullies */
-      '  vec2 bx = texture2D(uTex, vW.zy * vec2(0.031, 0.012) + vec2(0.4, 0.1)).gr;',
-      '  vec2 bz = texture2D(uTex, vW.xy * vec2(0.031, 0.012) + vec2(0.7, 0.3)).gr;',
-      '  vec2 bb = mix(bz, bx, Na.x / (Na.x + Na.z + 1e-3));',
+      /* one tap, projected on the face itself: across it horizontally, and
+         up it, stretched down the fall line so it draws gullies */
+      '  vec2 fN = normalize(vN.xz + vec2(1e-4, 0.0));',
+      '  vec2 bb = texture2D(uTex, vec2(dot(vW.xz, vec2(-fN.y, fN.x)), vW.y) * vec2(0.031, 0.012) + vec2(0.4, 0.1)).gr;',
       '  float rmod = bb.x;',
       '  float gully = smoothstep(0.08, 0.2, bb.x - bb.y);',
       '  vec3 rockC = uRock * (0.70 + 0.65 * rmod) * (1.0 - 0.26 * gully) * (1.0 - 0.22 * smoothstep(0.42, 0.22, rmod));',
