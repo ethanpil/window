@@ -2467,11 +2467,18 @@ var GLSL_COMMON = [
      drawn into a finer one of their own (bakeNear), 25 cm texels over the
      64 m square in front, whose border is lit so it clamps to nothing. */
   'uniform sampler2D uNearMap; uniform vec4 uNearR;',
+  'float bakedEdge(vec2 uv){ vec2 e = smoothstep(vec2(0.0), vec2(0.02), uv) * (1.0 - smoothstep(vec2(0.98), vec2(1.0), uv)); return e.x * e.y; }',
+  'float nearSun(vec2 xz){ return texture2D(uNearMap, (xz - uNearR.xy) * uNearR.zw).r; }',
   'vec2 bakedRG(vec2 xz){ vec2 uv = (xz - uShadowOrigin) * uShadowScale; vec2 v = texture2D(uShadowMap, uv).rg;',
-  '  float nr = texture2D(uNearMap, (xz - uNearR.xy) * uNearR.zw).r;',
-  '  vec2 e = smoothstep(vec2(0.0), vec2(0.02), uv) * (1.0 - smoothstep(vec2(0.98), vec2(1.0), uv));',
-  '  v = mix(vec2(1.0), v, e.x * e.y); v.x = min(v.x, nr); return v; }',
+  '  v = mix(vec2(1.0), v, bakedEdge(uv)); v.x = min(v.x, nearSun(xz)); return v; }',
   'float baked(vec2 xz){ return bakedRG(xz).x; }',
+  /* A bridge deck and the cars on it stand far above the ground the map was
+     baked for, whose shadow (the gorge's floor, the bridge's own blob) is not
+     theirs. lift 1: read instead how high the shadow climbs that column (A,
+     see bakeShadows) and be lit above it. One fetch either way. */
+  'float bakedSun(vec3 p, float lift){ vec2 uv = (p.xz - uShadowOrigin) * uShadowScale; vec4 t = texture2D(uShadowMap, uv);',
+  '  float s = mix(min(t.r, nearSun(p.xz)), smoothstep(-0.4, 0.4, p.y - (t.a * 640.0 - 160.0)), lift);',
+  '  return mix(1.0, s, bakedEdge(uv)); }',
   /* .b is the depth of standing water in metres (see bakeShadows); outside
      the baked rectangle it reads as deep */
   'float waterDepth(vec2 xz){ vec2 uv = (xz - uShadowOrigin) * uShadowScale; float b = texture2D(uShadowMap, uv).b;',
@@ -5137,6 +5144,8 @@ function solidMat(U, colour, opts) {
       uSpin: { value: opts.spin || 0 },
       uAoH: { value: opts.aoH == null ? 0.35 : opts.aoH },
       uTwoTone: { value: opts.twoTone ? 1 : 0 },
+      /* 1: stands high above the ground under it (a bridge): see bakedSun */
+      uLift: { value: opts.lift ? 1 : 0 },
       /* facade (grain 4): [cladding, share of bays with a window, bay width m,
          roof 0 tiles / 1 corrugated] and [door width m, door height m, round] */
       uFac: { value: new THREE.Vector4(fac.kind || 0, fac.win || 0, fac.bay || 2.6, fac.roof || 0) },
@@ -5144,7 +5153,7 @@ function solidMat(U, colour, opts) {
     },
     vertexShader: [
       'attribute vec3 iPos; attribute vec4 iAttr; attribute float rib;',
-      'uniform float uTime, uFogDensity, uShadow, uSpin, uAoH;',
+      'uniform float uTime, uFogDensity, uShadow, uSpin, uAoH, uLift;',
       'uniform vec3 uSunDir, uSunCol, uAmbCol, uBody, uFogCol;',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
       'varying vec3 vWp; varying vec3 vHaze; varying float vFogF; varying vec3 vMet; varying vec3 vNl;',
@@ -5175,7 +5184,7 @@ function solidMat(U, colour, opts) {
          underside dimly by the ground, and no sun reaches round the back. */
       /* the sun and its shadows are worked out per pixel (fragment), so a
          big wall or roof is not lit from its corners */
-      '  vCol = uBody * hemi(n, uAmbCol * 1.1) * ao * mix(1.0, bk.y, 0.6);',
+      '  vCol = uBody * hemi(n, uAmbCol * 1.1) * ao * mix(1.0, bk.y, 0.6 * (1.0 - uLift));',
       '  vCol *= 1.0 - 0.25 * uWet;',
       '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n; vWp = wp; vMet = lp; vNl = nl;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
@@ -5187,7 +5196,7 @@ function solidMat(U, colour, opts) {
     fragmentShader: [
       GLSL_TONE,
       'uniform vec3 uSpine, uTipCol, uBody2, uLichen, uBody; uniform float uRib, uNodes, uGrain, uRibN, uSpines, uTipMix, uBarkN, uBarkPlate, uTwoTone, uVarn;',
-      'uniform vec3 uSunDir, uSunCol; uniform float uShadow, uTime;',
+      'uniform vec3 uSunDir, uSunCol; uniform float uShadow, uTime, uLift;',
       GLSL_COMMON,
       /* A computed pattern has no mip chain, so once its stripes are finer than
          a pixel it turns to moire. This measures how fast the pattern's own
@@ -5208,7 +5217,7 @@ function solidMat(U, colour, opts) {
       '}',
       'void main(){',
       '  float diff = max(dot(normalize(vNrm), normalize(uSunDir)), 0.0);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vWp.xz, uTime)) * mix(0.03, 1.0, baked(vWp.xz));',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vWp.xz, uTime)) * mix(0.03, 1.0, bakedSun(vWp, uLift));',
       '  vec3 c = mix(vCol + uBody * uSunCol * diff * 1.15 * sh * (1.0 - 0.25 * uWet), vHaze, vFogF);',
       '  vec3 litC = c;',
       /* a roof, a cap, a set of tyres: parts marked as trim take the second
@@ -6134,16 +6143,26 @@ function bakeShadows(P, H, sunDir) {
   var hc = BK.hc, city = BK.city, wd = BK.wd, maxTop = BK.maxTop;
   var lit = new Float32Array(N * N);
   /* For a city, also how high the shadow reaches up each column (the walls
-     read it): the highest of each occluder's top less the ray's climb to it. */
-  var hsh = city ? new Float32Array(N * N) : null;
+     read it): the highest of each occluder's top less the ray's climb to it.
+     A bridge's deck and its cars read it too (bakedSun), so it is worked out
+     for the texels under the whole road and its towers as well. */
+  var bi0 = N, bi1 = -1, bj0 = N, bj1 = -1;
+  if (!city && P.bridgeSpan) {
+    var bHalf = P.bridgeRoad * 0.5, bW = P.bridgeW * 0.5 + 8;
+    bi0 = Math.max(0, Math.floor((-bHalf - SHADOW.x0) / sx)); bi1 = Math.min(N - 1, Math.floor((bHalf - SHADOW.x0) / sx));
+    bj0 = Math.max(0, Math.floor((P.bridgeZ - bW - SHADOW.z0) / sz)); bj1 = Math.min(N - 1, Math.floor((P.bridgeZ + bW - SHADOW.z0) / sz));
+  }
+  var hsh = city || bi1 >= bi0 ? new Float32Array(N * N) : null;
+  if (hsh) for (k = 0; k < N * N; k++) hsh[k] = -1e4;
   var dx = sunDir.x, dy = sunDir.y, dz = sunDir.z;
-  if (dy < 0.04) { for (k = 0; k < N * N; k++) { lit[k] = 1; if (city) hsh[k] = -1e4; } }
+  if (dy < 0.04) { for (k = 0; k < N * N; k++) lit[k] = 1; }
   else {
     /* towers throw long shadows: a longer, coarser march for a city */
     var step = city ? 5.0 : 3.2, steps = city ? 80 : 70;
     for (j = 0; j < N; j++) {
       for (i = 0; i < N; i++) {
         var px = i + 0.5, pz = j + 0.5, g0 = hc[j * N + i], ray = g0 + 0.35, open = 1, top = g0;
+        var tall = city || (i >= bi0 && i <= bi1 && j >= bj0 && j <= bj1);
         for (k = 0; k < steps; k++) {
           px += dx * step / sx; pz += dz * step / sz; ray += dy * step;
           /* above the tallest thing in the map nothing further can shade
@@ -6153,11 +6172,11 @@ function bakeShadows(P, H, sunDir) {
           var ii = px | 0, jj = pz | 0;
           if (ii < 0 || jj < 0 || ii >= N || jj >= N) break;
           var hk = hc[jj * N + ii];
-          if (hk > ray) { open = 0; if (!city) break; }
-          if (city && hk - (ray - g0 - 0.35) > top) top = hk - (ray - g0 - 0.35);
+          if (hk > ray) { open = 0; if (!tall) break; }
+          if (tall && hk - (ray - g0 - 0.35) > top) top = hk - (ray - g0 - 0.35);
         }
         lit[j * N + i] = open;
-        if (city) hsh[j * N + i] = top;
+        if (tall) hsh[j * N + i] = top;
       }
     }
   }
@@ -6220,8 +6239,9 @@ function bakeShadows(P, H, sunDir) {
     var v = Math.round((acc / cnt) * 255);
     var o = (j * N + i) * 4;
     out[o] = v; out[o + 1] = Math.round(ao[j * N + i] * 255); out[o + 2] = wd[j * N + i];
-    /* A: the shadow's height up the column, -160 to 480 m (city only) */
-    out[o + 3] = city ? Math.round(clamp((hsh[j * N + i] + 160) / 640, 0, 1) * 255) : 255;
+    /* A: the shadow's height up the column, -160 to 480 m (a city, under a
+       bridge); 0, no shadow at any height, where nothing reads it */
+    out[o + 3] = hsh ? Math.round(clamp((hsh[j * N + i] + 160) / 640, 0, 1) * 255) : 0;
   }
   var tex = new THREE.DataTexture(out, N, N, THREE.RGBAFormat);
   tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
@@ -7502,11 +7522,11 @@ function bridgeGeo(P, R, H) {
 function buildBridge(scene, P, R, U, H) {
   var col = { suspension: '#9aa2a6', arch: '#8e9498', girder: '#6f5a4a', stone: '#a3968a' }[P.bridgeKind];
   /* no foot to darken: the bridge's origin is its deck, not the ground */
-  var mat = solidMat(U, col, { rib: 0, grain: 0, spines: 0, body2: '#36373a', twoTone: 1, aoH: 0 });
+  var mat = solidMat(U, col, { rib: 0, grain: 0, spines: 0, body2: '#36373a', twoTone: 1, aoH: 0, lift: 1 });
   var geo = bridgeGeo(P, R, H);
   var at = [[0, P.bridgeDeck, P.bridgeZ, 1, 0, 1, 1]];
   instanceSolid(scene, geo, at, mat);
-  instanceSolid(scene, P.bridgeLines, at, solidMat(U, '#d9d7d0', { rib: 0, grain: 0, spines: 0, aoH: 0 }));
+  instanceSolid(scene, P.bridgeLines, at, solidMat(U, '#d9d7d0', { rib: 0, grain: 0, spines: 0, aoH: 0, lift: 1 }));
   /* the banks are earth grown over with grass */
   var bank = new THREE.Color(P.grass.base).lerp(new THREE.Color(P.grass.soil), 0.35);
   instanceSolid(scene, P.bridgeBank, at, solidMat(U, '#' + bank.getHexString(), { rib: 0, grain: 0, spines: 0, aoH: 0 }));
@@ -7519,7 +7539,7 @@ function buildBridge(scene, P, R, U, H) {
   App._shadows.push([0, P.bridgeDeck, P.bridgeZ, P.bridgeSpan * 0.22, 0.75, 2]);
   buildTraffic(scene, P, R, U, {
     x: 0, y: P.bridgeDeck + P.bridgeTh * 0.5, z: P.bridgeZ, len: P.bridgeRoad, dir: [1, 0],
-    lanes: [-P.bridgeW * 0.22, P.bridgeW * 0.22], rate: P.trafficRate, speed: [20, 25]
+    lanes: [-P.bridgeW * 0.22, P.bridgeW * 0.22], rate: P.trafficRate, speed: [20, 25], lift: 1
   });
 }
 
@@ -7594,12 +7614,13 @@ function buildTraffic(scene, P, R, U, o) {
       uNight: App.skyU.uNight,
       uOrigin: { value: new THREE.Vector3(o.x || 0, o.y, o.z) },
       uDir: { value: new THREE.Vector2(o.dir[0], o.dir[1]).normalize() },
-      uLen: { value: o.len }
+      uLen: { value: o.len },
+      uLift: { value: o.lift ? 1 : 0 }
     },
     extensions: { derivatives: true },
     vertexShader: [
       'attribute vec4 iAttr; attribute vec3 iCol; attribute vec4 iLane; attribute float aPart;',
-      'uniform float uTime, uFogDensity, uLen, uShadow, uNight;',
+      'uniform float uTime, uFogDensity, uLen, uShadow, uNight, uLift;',
       'uniform vec2 uDir;',
       'uniform vec3 uOrigin, uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
       'varying vec3 vCol; varying float vFog; varying vec3 vHaze; varying vec3 vLoc; varying float vEnd; varying float vPart; varying vec3 vNl; varying vec2 vKind;',
@@ -7625,7 +7646,7 @@ function buildTraffic(scene, P, R, U, o) {
       '  vec2 nxz = uDir * normal.x + across * normal.z;',
       '  vec3 n = normalize(vec3(nxz.x, normal.y, nxz.y));',
       '  float diff = max(dot(n, normalize(uSunDir)), 0.0);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(xz, uTime)) * mix(0.03, 1.0, baked(xz));',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(xz, uTime)) * mix(0.03, 1.0, bakedSun(p, uLift));',
       '  vCol = iCol * (hemi(n, uAmbCol * 1.1) + uSunCol * diff * 1.05 * sh);',
       /* paint and glass catch the sky on their tops */
       '  vCol += uFogCol * 0.10 * smoothstep(0.5, 0.9, n.y);',
