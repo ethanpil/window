@@ -6448,7 +6448,7 @@ function buildCascadeFall(scene, P, R, U, H) {
     }
     pts[m2].dropF = acc / cnt;
   }
-  var pos = [], uv = [], idx = [], run = 0, lastZ = -1e9;
+  var pos = [], uv = [], idx = [], drops = [], run = 0, lastZ = -1e9;
   for (var m = 0; m < pts.length; m++) {
     var pt = pts[m];
     if (m > 0) run += Math.hypot(pt.z - pts[m - 1].z, pt.y - pts[m - 1].y);
@@ -6467,6 +6467,7 @@ function buildCascadeFall(scene, P, R, U, H) {
     pos.push(fx + pt.w, yR, zz2);
     var v = run / Math.max(total, 1);
     uv.push(0, v, 1, v);
+    drops.push(pt.dropF, pt.dropF);
     if (m < pts.length - 1) {
       var o = m * 2;
       idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
@@ -6475,13 +6476,15 @@ function buildCascadeFall(scene, P, R, U, H) {
   var geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('aDrop', new THREE.Float32BufferAttribute(drops, 1));
   geo.setIndex(idx);
   geo.computeVertexNormals();
 
   var mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol,
-      uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uHazeK: U.uHazeK,
+      uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow,
+      uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale,
       uLen: { value: total }
     },
     extensions: { derivatives: true },
@@ -6493,12 +6496,15 @@ function buildCascadeFall(scene, P, R, U, H) {
     polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -16,
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
     vertexShader: [
-      'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
-      'uniform float uFogDensity; uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol;',
+      'attribute float aDrop;',
+      'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze; varying float vDrop;',
+      'uniform float uFogDensity, uShadow, uTime; uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol;',
       GLSL_COMMON,
-      'void main(){ vUv = uv;',
-      '  vTint = uAmbCol * 1.6 + uSunCol * 1.0;',
+      'void main(){ vUv = uv; vDrop = aDrop;',
       '  vec4 wp = modelMatrix * vec4(position, 1.0);',
+      /* lit like the rock it runs over: in the gully's shade it is grey */
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.15, 1.0, baked(wp.xz));',
+      '  vTint = uAmbCol * 1.35 + uSunCol * 0.95 * sh;',
       '  vec4 mv = viewMatrix * wp;',
       '  vFog = fogAmt(-mv.z, uFogDensity);',
       '  vHaze = hazeAt(uFogCol, normalize(wp.xyz - cameraPosition), uSunDir, uSunCol, vFog);',
@@ -6506,7 +6512,7 @@ function buildCascadeFall(scene, P, R, U, H) {
     ].join('\n'),
     fragmentShader: [
       GLSL_TONE,
-      'uniform float uTime, uLen; varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
+      'uniform float uTime, uLen; varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze; varying float vDrop;',
       'float h1(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.545); }',
       /* Value noise. Read with the fall stretched against the width, it draws
          threads rather than blobs. The old pattern cut the sheet into thirty
@@ -6543,15 +6549,22 @@ function buildCascadeFall(scene, P, R, U, H) {
       '  w = clamp((w - 0.30) * 2.6, 0.0, 1.0);',
       /* whole over the lip, fraying into threads the further it falls */
       '  float veil = smoothstep(mix(0.10, 0.40, d), mix(0.42, 0.80, d), w);',
-      /* the sheet feathers to nothing at either edge */
-      '  float body = smoothstep(0.0, 0.09, vUv.x) * smoothstep(1.0, 0.91, vUv.x);',
+      /* the sheet feathers to nothing at either edge, and the edges wander:
+         a fall is never ruled straight */
+      '  float ew = vn(vec2(y * 0.35, 3.1)), ew2 = vn(vec2(y * 0.35, 8.7));',
+      '  float body = smoothstep(0.0, 0.08 + 0.16 * ew, vUv.x) * smoothstep(1.0, 0.92 - 0.16 * ew2, vUv.x);',
       /* white water where it lands, and a little breaking over the lip. This
          was the other way about, so the froth gathered at the head. */
       '  float froth = max(smoothstep(0.76, 1.0, d), smoothstep(0.05, 0.0, d) * 0.6);',
-      /* a body of water carrying threads, not threads alone */
-      '  float a = body * mix(0.30 + 0.70 * veil, 1.0, froth * 0.9);',
-      '  vec3 c = mix(vec3(0.55, 0.67, 0.76), vec3(1.0), clamp(w * 0.85 + froth * 0.9, 0.0, 1.0));',
-      '  gl_FragColor = vec4(tone(mix(c * vTint * 0.55, vHaze, vFog * 0.7)), a * 0.95 * (1.0 - vFog * 0.6));',
+      /* Over a pitch it is a white veil of threads. Over a bench it slides
+         on the rock: dark and glassy, broken only by streaks of white where
+         it riffles. Painted white all the way down, it read as paper steps. */
+      '  float riff = smoothstep(0.55, 0.9, w);',
+      '  vec3 cDrop = mix(vec3(0.60, 0.70, 0.78), vec3(1.0), clamp(w * 0.85 + froth * 0.9, 0.0, 1.0));',
+      '  vec3 cBench = mix(vec3(0.16, 0.22, 0.25), vec3(0.92, 0.95, 0.96), clamp(riff * 0.75 + froth * 0.8, 0.0, 1.0));',
+      '  vec3 c = mix(cBench, cDrop, vDrop);',
+      '  float a = body * mix(mix(0.50 + 0.40 * riff, 0.30 + 0.70 * veil, vDrop), 1.0, froth * 0.9);',
+      '  gl_FragColor = vec4(tone(mix(c * vTint * 0.55, vHaze, vFog * 0.7)), a * (1.0 - vFog * 0.6));',
       '}'
     ].join('\n')
   });
@@ -8234,40 +8247,71 @@ function buildFalls(scene, P, R, U, H) {
     App._features.push(['waterfall', x, z]);
   }
   if (!picks.length) return;
-  var quad = new THREE.PlaneGeometry(1, 1);
-  quad.translate(0, -0.5, 0);
-  var geo = new THREE.InstancedBufferGeometry();
-  geo.index = quad.index;
-  geo.setAttribute('position', quad.attributes.position);
-  geo.setAttribute('uv', quad.attributes.uv);
-  var iPos = new Float32Array(picks.length * 3);
-  var iAttr = new Float32Array(picks.length * 3);
-  for (var i = 0; i < picks.length; i++) {
-    iPos[i * 3] = picks[i][0]; iPos[i * 3 + 1] = picks[i][2]; iPos[i * 3 + 2] = picks[i][1];
-    iAttr[i * 3] = picks[i][3];
-    iAttr[i * 3 + 1] = picks[i][4];
-    iAttr[i * 3 + 2] = R.range(0, 6.283);
+  /* Each fall is a ribbon laid down the rock from its lip toward the viewer,
+     a little proud of it, for as long as the ground keeps dropping steeply.
+     A card hung straight down from the lip went into the face of any wall
+     that leaned back, and only a stub showed at the top. */
+  var pos = [], side = [], along = [], seeds = [], wids = [], lens = [], idx = [];
+  var seedsR = [];
+  for (var i = 0; i < picks.length; i++) seedsR.push(R.range(0, 6.283));
+  for (i = 0; i < picks.length; i++) {
+    var pk = picks[i], ux = -pk[0], uz = -pk[1], ul = Math.sqrt(ux * ux + uz * uz) || 1;
+    ux /= ul; uz /= ul;
+    var x0 = pk[0] - ux * 6.5, z0 = pk[1] - uz * 6.5, top = pk[2], line = [], lastH = top;
+    for (var sd = 0; sd < 300; sd += 2.5) {
+      var px = x0 + ux * sd, pz = z0 + uz * sd, h = H(px, pz);
+      if (sd > 0 && (lastH - h < 0.35 || top - h > 180)) break;     /* the ground has levelled out */
+      if (P.waterY != null && h < P.waterY + 0.3) { line.push([px, Math.max(h, P.waterY) + 0.6, pz]); break; }
+      line.push([px, h + 1.2, pz]);
+      lastH = h;
+    }
+    if (line.length < 3) line = [[pk[0], top + 1.2, pk[1]], [pk[0], top - pk[3] * 0.5, pk[1]], [pk[0], top - pk[3], pk[1]]];
+    var drop = line[0][1] - line[line.length - 1][1];
+    var start = pos.length / 3;
+    for (var k = 0; k < line.length; k++) {
+      for (var e = -1; e <= 1; e += 2) {
+        pos.push(line[k][0], line[k][1], line[k][2]);
+        side.push(e); along.push(k / (line.length - 1));
+        seeds.push(seedsR[i]); wids.push(pk[4]); lens.push(Math.max(drop, 10));
+      }
+      if (k < line.length - 1) {
+        var o = start + k * 2;
+        idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
+      }
+    }
   }
-  geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
-  geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 3));
-  geo.instanceCount = picks.length;
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('aSide', new THREE.Float32BufferAttribute(side, 1));
+  geo.setAttribute('aAlong', new THREE.Float32BufferAttribute(along, 1));
+  geo.setAttribute('aSeed', new THREE.Float32BufferAttribute(seeds, 1));
+  geo.setAttribute('aWidth', new THREE.Float32BufferAttribute(wids, 1));
+  geo.setAttribute('aLen', new THREE.Float32BufferAttribute(lens, 1));
+  geo.setIndex(idx);
   var mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime, uCamPos: U.uCamPos, uFogCol: U.uFogCol,
       uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uAmbCol: U.uAmbCol, uSunCol: U.uSunCol,
       uMap: { value: makeCloudTexture(R.int(1, 99999)) }
     },
+    extensions: { derivatives: true },
+    /* it rides a metre clear of the rock, and is drawn toward the eye in depth
+       as the cascade is, so the face it lies on does not cut it into bands */
+    polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -16,
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
     vertexShader: [
-      'attribute vec3 iPos; attribute vec3 iAttr;',
+      'attribute float aSide, aAlong, aSeed, aWidth, aLen;',
       'uniform vec3 uCamPos; uniform float uFogDensity;',
-      'varying vec2 vUv; varying float vFog; varying float vLen;',
+      'varying vec2 vUv; varying float vFog; varying float vLen, vSeed, vW;',
       GLSL_COMMON,
       'void main(){',
-      '  vec3 toCam = normalize(vec3(uCamPos.x - iPos.x, 0.0, uCamPos.z - iPos.z));',
+      '  vec3 toCam = normalize(vec3(uCamPos.x - position.x, 0.0, uCamPos.z - position.z));',
       '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 wp = iPos + right * position.x * iAttr.y + vec3(0.0, position.y * iAttr.x, 0.0);',
-      '  vUv = uv; vLen = iAttr.x;',
+      /* it spreads as it falls, and billows out into spray at the foot */
+      '  float dn = aAlong;',
+      '  float spread = 1.0 + dn * 0.5 + smoothstep(0.82, 1.0, dn) * 1.6;',
+      '  vec3 wp = position + right * aSide * 0.5 * aWidth * spread;',
+      '  vUv = vec2(aSide * 0.5 + 0.5, 1.0 - aAlong); vLen = aLen; vSeed = aSeed; vW = aWidth * spread;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  vFog = fogAmt(-mv.z, uFogDensity);',
       '  gl_Position = projectionMatrix * mv;',
@@ -8277,15 +8321,29 @@ function buildFalls(scene, P, R, U, H) {
       GLSL_TONE,
       'uniform sampler2D uMap; uniform vec3 uFogCol, uAmbCol, uSunCol;',
       'uniform float uTime;',
-      'varying vec2 vUv; varying float vFog; varying float vLen;',
+      'varying vec2 vUv; varying float vFog; varying float vLen, vSeed, vW;',
+      'float hf(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
+      'float vnf(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+      '  return mix(mix(hf(i), hf(i + vec2(1.0, 0.0)), f.x), mix(hf(i + vec2(0.0, 1.0)), hf(i + vec2(1.0)), f.x), f.y); }',
       'void main(){',
-      '  float fall = uTime * (0.55 + vLen * 0.006);',
-      '  float n = texture2D(uMap, vec2(vUv.x * 0.7, vUv.y * 0.35 + fall)).r;',
-      '  n = n * 0.6 + texture2D(uMap, vec2(vUv.x * 1.7 + 0.3, vUv.y * 0.8 + fall * 1.7)).r * 0.4;',
-      '  float edge = smoothstep(0.0, 0.22, vUv.x) * smoothstep(1.0, 0.78, vUv.x);',
-      '  float spread = mix(1.0, 0.55, vUv.y);',
-      '  float a = edge * spread * smoothstep(0.28, 0.72, n) * 0.85;',
-      '  a += edge * (1.0 - smoothstep(0.0, 0.14, vUv.y)) * 0.35;',
+      /* Streaks running down the drop, stretched along it and quickening as
+         they go; a puffy cloud texture read up it had made a dotted line.
+         The fine streaks fade to their mean once narrower than a pixel. */
+      '  float d = 1.0 - vUv.y;',
+      '  float along = pow(d, 0.7) * vLen * 0.09;',
+      '  float x = vUv.x * vW * 0.9 + vSeed * 7.0;',
+      '  float s1 = vnf(vec2(x, along - uTime * 2.2));',
+      '  float s2 = vnf(vec2(x * 2.3 + 3.1, along * 1.9 - uTime * 4.1));',
+      '  float k2 = 1.0 - smoothstep(0.30, 0.85, fwidth(x) * 2.3);',
+      '  float n = s1 * 0.62 + mix(0.5, s2, k2) * 0.38;',
+      /* the edges wander as the water does */
+      '  float ew = vnf(vec2(along * 0.25, vSeed)) * 0.18;',
+      '  float edge = smoothstep(0.0, 0.16 + ew, vUv.x) * smoothstep(1.0, 0.84 - ew, vUv.x);',
+      '  float a = edge * mix(0.75, 0.45, d) * smoothstep(0.25, 0.70, n);',
+      '  a += edge * (1.0 - smoothstep(0.0, 0.08, d)) * 0.35;',
+      /* spray at the foot: a soft cloud, not a hard end */
+      '  float foot = smoothstep(0.80, 1.0, d) * (1.0 - smoothstep(0.30, 0.50, abs(vUv.x - 0.5)) * 0.8);',
+      '  a = max(a, foot * 0.45 * (0.6 + 0.4 * s1));',
       '  vec3 col = mix(vec3(0.86, 0.92, 0.95), uSunCol * 0.6 + uAmbCol * 0.8, 0.35);',
       '  gl_FragColor = vec4(mix(col, uFogCol, vFog), a * (1.0 - vFog * 0.85));',
       '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
