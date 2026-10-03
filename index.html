@@ -1022,12 +1022,17 @@ function buildParams(seedStr, nonce) {
   var B = P.biome;
   var SEA = P.season;
   P.grass = R.pick(B.palettes);
-  /* clone before tinting: the palette tables are shared */
+  /* clone before tinting: the palette tables are shared. Seasons change what
+     grows, not sand and rock: in the arid palettes the ground fields stay
+     as drawn (all four in sand/dust/salt; soil and dry where base/tip are
+     the grass), and only the plant colours take the tint. */
+  var sandG = { coast: 1, desert: 1, canyon: 1, saltflat: 1 }[P.biomeKey] ? 0 : 1;
+  var soilG = { coast: 1, desert: 1, canyon: 1, saltflat: 1, oasis: 1, savanna: 1 }[P.biomeKey] ? 0 : 1;
   P.grass = {
-    name: P.grass.name, base: tintHex(P.grass.base, SEA.hue, SEA.sat, SEA.light),
-    tip: tintHex(P.grass.tip, SEA.hue, SEA.sat, SEA.light),
-    soil: tintHex(P.grass.soil, SEA.hue * 0.4, SEA.sat * 0.4, SEA.light * 0.5),
-    dry: tintHex(P.grass.dry, SEA.hue * 0.6, SEA.sat * 0.5, SEA.light * 0.6),
+    name: P.grass.name, base: tintHex(P.grass.base, SEA.hue * sandG, SEA.sat * sandG, SEA.light * sandG),
+    tip: tintHex(P.grass.tip, SEA.hue * sandG, SEA.sat * sandG, SEA.light * sandG),
+    soil: tintHex(P.grass.soil, SEA.hue * 0.4 * soilG, SEA.sat * 0.4 * soilG, SEA.light * 0.5 * soilG),
+    dry: tintHex(P.grass.dry, SEA.hue * 0.6 * soilG, SEA.sat * 0.5 * soilG, SEA.light * 0.6 * soilG),
     cb: P.grass.cb ? tintHex(P.grass.cb, SEA.hue, SEA.sat, SEA.light) : null,
     ct: P.grass.ct ? tintHex(P.grass.ct, SEA.hue, SEA.sat, SEA.light) : null
   };
