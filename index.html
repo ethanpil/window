@@ -4009,6 +4009,7 @@ function solidMat(U, colour, opts) {
       'uniform float uTime, uFogDensity, uShadow, uSpin, uAoH;',
       'uniform vec3 uSunDir, uSunCol, uAmbCol, uBody, uFogCol;',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
+      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF;',
       GLSL_COMMON,
       'void main(){',
       '  float sc = iAttr.x, rot = iAttr.y;',
@@ -4025,9 +4026,7 @@ function solidMat(U, colour, opts) {
       '  }',
       '  vec3 wp = iPos + vec3(lp.x * c - lp.z * s, lp.y, lp.x * s + lp.z * c);',
       '  vec3 n = normalize(vec3(nl.x * c - nl.z * s, nl.y, nl.x * s + nl.z * c));',
-      '  float diff = max(dot(n, normalize(uSunDir)), 0.0);',
       '  vec2 bk = bakedRG(wp.xz);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       /* contact darkening at the foot, in metres, so a house and a cactus get
          the same thin band instead of a third of their height. It is the sky
          that the ground hides, so it dims the ambient only, never the sun. */
@@ -4036,24 +4035,29 @@ function solidMat(U, colour, opts) {
          came out evenly lit: a trunk read as a flat plank. Sky above, the
          ground's bounce below: a shaded side is lit cool from the sky, an
          underside dimly by the ground, and no sun reaches round the back. */
-      '  vCol = uBody * (hemi(n, uAmbCol * 1.1) * ao * mix(1.0, bk.y, 0.6) + uSunCol * diff * 1.15 * sh);',
+      /* the sun and its shadows are worked out per pixel (fragment), so a
+         big wall or roof is not lit from its corners */
+      '  vCol = uBody * hemi(n, uAmbCol * 1.1) * ao * mix(1.0, bk.y, 0.6);',
       '  vCol *= 1.0 - 0.25 * uWet;',
-      '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n;',
+      '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n; vWp = wp;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  float fH = fogAmtH(-mv.z, uFogDensity, wp.y);',
-      '  vCol = mix(vCol, hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, fH), fH);',
+      '  vFogF = fH; vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, fH);',
       '  gl_Position = projectionMatrix * mv;',
       '}'
     ].join('\n'),
     fragmentShader: [
       GLSL_TONE,
       'uniform vec3 uSpine, uTipCol, uBody2, uLichen, uBody; uniform float uRib, uNodes, uGrain, uRibN, uSpines, uTipMix, uBarkN, uBarkPlate, uTwoTone;',
+      'uniform vec3 uSunDir, uSunCol; uniform float uShadow, uTime;',
+      GLSL_COMMON,
       /* A computed pattern has no mip chain, so once its stripes are finer than
          a pixel it turns to moire. This measures how fast the pattern's own
          coordinate moves per pixel and fades the pattern out as it nears that
          limit, which is what a mip-map would have done for a texture. */
       'float bandLimit(float x, float freq){ float w = fwidth(x) * freq; return 1.0 - smoothstep(0.30, 0.85, w); }',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
+      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF;',
       'float h3(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }',
       /* smooth value noise: a hash alone is constant across its cell, which
          is what made lichen come out as flat squares */
@@ -4064,7 +4068,10 @@ function solidMat(U, colour, opts) {
       '             mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);',
       '}',
       'void main(){',
-      '  vec3 c = vCol;',
+      '  float diff = max(dot(normalize(vNrm), normalize(uSunDir)), 0.0);',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vWp.xz, uTime)) * mix(0.03, 1.0, baked(vWp.xz));',
+      '  vec3 c = mix(vCol + uBody * uSunCol * diff * 1.15 * sh * (1.0 - 0.25 * uWet), vHaze, vFogF);',
+      '  vec3 litC = c;',
       /* a roof, a cap, a set of tyres: parts marked as trim take the second
          colour, keeping the light already worked out for them */
       '  if (uTwoTone > 0.5) c *= mix(vec3(1.0), uBody2 / max(uBody, vec3(0.02)), step(0.5, vRib));',
@@ -4085,9 +4092,9 @@ function solidMat(U, colour, opts) {
       /* past the limit the spines average into a slight overall paleness
          rather than vanishing or crawling */
       '    float amt = clamp(crest * areole * 0.70 * uSpines, 0.0, 0.85);',
-      '    c = mix(c, uSpine * (0.35 + 0.65 * length(vCol)), mix(0.09 * uSpines, amt, kSpine));',
+      '    c = mix(c, uSpine * (0.35 + 0.65 * length(litC)), mix(0.09 * uSpines, amt, kSpine));',
       '  }',
-      '  c = mix(c, uTipCol * (0.4 + 0.6 * length(vCol)), uTipMix * smoothstep(0.72, 1.0, vUp));',
+      '  c = mix(c, uTipCol * (0.4 + 0.6 * length(litC)), uTipMix * smoothstep(0.72, 1.0, vUp));',
       '  if (uNodes > 0.5) {',
       '    float seg = fract(vUp * 7.0 + vSeed * 0.3);',
       '    c *= 0.78 + 0.22 * smoothstep(0.02, 0.13, seg);',
@@ -4127,7 +4134,7 @@ function solidMat(U, colour, opts) {
          noise at two scales instead, and thin the fine one with distance. */
       '    float lf = vn3(q * 3.4) * 0.66 + mix(0.5, vn3(q * 9.0), k9) * 0.34;',
       '    float lich = smoothstep(0.54, 0.78, lf);',
-      '    c = mix(c, uLichen * (0.4 + 0.6 * length(vCol) / max(length(uBody), 0.05)), lich * upFace * 0.70);',
+      '    c = mix(c, uLichen * (0.4 + 0.6 * length(litC) / max(length(uBody), 0.05)), lich * upFace * 0.70);',
       '  } else if (uGrain > 0.5) {',
       /* Bark is not a comb. This was a triangle wave at one fixed pitch with
          a slow wobble laid over it, every ridge the same width and the same
