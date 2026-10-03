@@ -1669,7 +1669,8 @@ function makeGroundTexture(P, seed, size) {
         stamp(px2, py2, function () { ctx.beginPath(); ctx.arc(0, 0, rr2, 0, 6.283); ctx.fill(); });
       }
     }
-  } else if (kind === 'urban') {
+  } else if (kind === 'urban' || kind === 'skyline') {
+    /* pavement and asphalt: cracks and patching, no grass blades */
     for (var cr2 = 0; cr2 < 30; cr2++) {
       var ux = R.f() * S, uy = R.f() * S, ua = R.f() * 6.283;
       ctx.strokeStyle = rgba(soil, 0.5); ctx.lineWidth = R.range(0.7, 1.4) * scale;
@@ -3069,10 +3070,11 @@ function makeHeightField(P) {
     };
   }
   if (kind === 'skyline') {
-    /* the street far below: level, with the grid of blocks cut into it */
+    /* The street far below: dead level, as a paved city is, so the cars and
+       the kerbs sit on it; only past the city does the land rise a little. */
     return function (x, z) {
       var d = Math.sqrt(x * x + z * z);
-      return -P.storey + fbm2(x * 0.02, z * 0.02, s, 2) * 0.4 + smoothstep(600, 2000, d) * far * 0.6;
+      return -P.storey + smoothstep(900, 2000, d) * (far * 0.6 + fbm2(x * 0.004, z * 0.004, s, 2) * 6);
     };
   }
   if (kind === 'marsh') {
@@ -3361,6 +3363,7 @@ function buildTerrain(scene, P, R, U, H) {
       return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
     };
   })();
+  var CP = cityPlan(P);
   var uni = {
     uTime: U.uTime, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol,
     uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow, uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale, uSnow: U.uSnow,
@@ -3373,7 +3376,7 @@ function buildTerrain(scene, P, R, U, H) {
     uTip: { value: new THREE.Color(P.grass.tip) },
     /* heather is brown stems with a band of bells on top: from afar it is
        brown touched with purple, not a purple wash */
-    uCoverCol: { value: new THREE.Color(P.grass.cb || P.grass.base)
+    uCoverCol: { value: P.terrainKind === 'skyline' ? new THREE.Color('#3b3c3e') : new THREE.Color(P.grass.cb || P.grass.base)
       .lerp(new THREE.Color(P.grass.ct || P.grass.tip), P.coverStyle === 'heather' ? 0.32 : 0.62) },
     uWindDir: U.uWindDir, uWind: U.uWind,
     /* flowers too small to draw past twenty metres or so still colour the
@@ -3424,6 +3427,13 @@ function buildTerrain(scene, P, R, U, H) {
     uPathPh2: { value: P.pathPhase2 || 0 },
     uPathGauge: { value: P.pathGauge || 0.0 },
     uPathCol: { value: new THREE.Color(P.grass.soil) },
+    /* a city's streets, drawn on its grid (see cityPlan): [cos, sin, pitch,
+       block], [street, pavement, ring start, ring end] */
+    uCityOn: { value: CP ? 1.0 : 0.0 },
+    uCity: { value: new THREE.Vector4(CP ? CP.ca : 1, CP ? CP.sa : 0, CP ? CP.pitch : 1, CP ? CP.bw : 1) },
+    uCity2: { value: new THREE.Vector4(CP ? CP.sw : 1, CP ? CP.sk : 1, CP ? CP.start : 0, CP ? CP.end : 0) },
+    uCityPark: { value: new THREE.Color(P.grass.cb || P.grass.base) },
+    uNight: App.skyU.uNight,
     /* the kept ground under the window: depth, edge wobble, edge softness, kind */
     uClear: { value: new THREE.Vector4(P.clearD || 0, P.clearKind ? CLEAR_EDGE[P.clearKind][0] : 0,
                                        P.clearKind ? CLEAR_EDGE[P.clearKind][1] : 1, P.clearKind || 0) },
@@ -3459,6 +3469,15 @@ function buildTerrain(scene, P, R, U, H) {
       'uniform float uPathW, uPathX, uPathZ, uPathBend, uPathPh, uPathBend2, uPathK2, uPathPh2, uPathGauge;',
       'uniform vec2 uPathDir; uniform vec3 uPathCol; uniform vec4 uClear;',
       'uniform vec2 uWindDir; uniform float uWind, uFlwK; uniform vec3 uFlw0, uFlw1, uFlw2;',
+      'uniform float uCityOn, uNight; uniform vec4 uCity, uCity2; uniform vec3 uCityPark;',
+      /* Painted lines and paving joints, box-filtered over the pixel's own
+         footprint f: exact coverage near, their average far, never moire.
+         sqAA: a dash pattern of period T, duty D. bandAA: the band lo..hi. */
+      'float sqI(float x, float T, float D){ return floor(x / T) * D * T + min(fract(x / T) * T, D * T); }',
+      'float sqAA(float x, float T, float D, float f){ f = max(f, 1e-3); return (sqI(x + 0.5 * f, T, D) - sqI(x - 0.5 * f, T, D)) / f; }',
+      'float bandAA(float d, float lo, float hi, float f){ f = max(f, 1e-3); return max(0.0, min(d + 0.5 * f, hi) - max(d - 0.5 * f, lo)) / f; }',
+      /* is the block centred here part of the city (its streets are drawn)? */
+      'float cityBlk(vec2 b){ float d = length(b * uCity.z); return step(uCity2.z - uCity.z * 0.6, d) * step(d, uCity2.w); }',
       /* the same edge as clearAt() in the script */
       'float clearAmt(vec3 w){',
       '  float edge = -uClear.x + uClear.y * (sin(w.x * 0.31 + 0.7) + 0.6 * sin(w.x * 0.83 + 2.1));',
@@ -3579,6 +3598,59 @@ function buildTerrain(scene, P, R, U, H) {
       '  float kG = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 6.0);',
       '  float dirt = vn(vW.xz * 1.3) * 0.55 + mix(0.5, vn(vW.xz * 6.0 + 17.0), kG) * 0.45;',
       '  if (onPath > 0.001) c = mix(c, uPathCol * (0.80 + 0.36 * dirt), onPath * 0.88);',
+      /* A city's streets, on its grid: asphalt with paler polished wheel tracks
+         and oil down the lanes, a gutter, painted centre and lane lines,
+         zebra crossings set back from each junction and a stop line, paved
+         pavements with a pale kerb, paved block interiors and now and then a
+         green courtyard. Every line is box-filtered by its footprint. No
+         texture is read in here: the noise is what was fetched above. At
+         night the street lamps lay pools of light along the pavements. */
+      '  float pool = 0.0;',
+      '  if (uCityOn > 0.5) {',
+      '    vec2 gq = vec2(vW.x * uCity.x + vW.z * uCity.y, -vW.x * uCity.y + vW.z * uCity.x);',
+      '    vec2 blk = floor(gq / uCity.z + 0.5), lq = gq - blk * uCity.z, sg = sign(lq);',
+      '    vec2 e = abs(lq) - 0.5 * uCity.w;',
+      '    float zone = max(cityBlk(blk), max(step(0.0, e.x) * cityBlk(blk + vec2(sg.x, 0.0)),',
+      '                 max(step(0.0, e.y) * cityBlk(blk + vec2(0.0, sg.y)), step(0.0, min(e.x, e.y)) * cityBlk(blk + sg))));',
+      '    zone *= smoothstep(uWaterY + 0.6, uWaterY + 1.0, vW.y);',
+      '    float sw = uCity2.x, sk = uCity2.y, rw = sw - 2.0 * sk, mid = 0.5 * sw;',
+      '    bool ns = e.x > e.y;',
+      '    float ac = ns ? e.x : e.y, al = ns ? gq.y : gq.x, ot = ns ? e.y : e.x;',
+      '    float fq = max(fwidth(gq.x), fwidth(gq.y));',
+      '    float kAgg = 1.0 - smoothstep(0.30, 0.85, fq * 6.0);',
+      '    float agg = mix(0.5, h2(floor(vW.xz * 6.0)), kAgg);',
+      '    float dc = abs(ac - mid), wide = step(12.0, rw);',
+      '    float lw = mix(rw * 0.5, rw * 0.25, wide), lc = abs(fract(dc / lw) * lw - 0.5 * lw);',
+      '    vec3 road = vec3(0.115, 0.117, 0.122) * (0.80 + 0.28 * agg + 0.30 * (dirt - 0.5) + 0.25 * (c2.g - cM.g));',
+      '    road *= (1.0 + 0.10 * bandAA(lc, 0.55, 1.15, fq) - 0.10 * bandAA(lc, 0.0, 0.40, fq)) * (1.0 - 0.22 * bandAA(ac, sk, sk + 0.45, fq));',
+      '    float inter = smoothstep(-fq, fq, ot);',
+      '    float centre = mix(sqAA(al, 9.0, 0.38, fq) * bandAA(dc, 0.0, 0.075, fq), bandAA(dc, 0.07, 0.19, fq), wide);',
+      '    float laneL = wide * sqAA(al + 3.0, 9.0, 0.33, fq) * bandAA(abs(dc - lw), 0.0, 0.07, fq);',
+      '    float zeb = bandAA(ot, -4.6, -1.2, fq);',
+      '    float stripes = sqAA(ac - sk - 0.3, 1.1, 0.5, fq) * zeb;',
+      '    float appr = abs(step(mid, ac) - step(0.0, sg.x * sg.y));',
+      '    float stopL = bandAA(ot, -5.9, -5.45, fq) * appr;',
+      '    float mk = clamp((centre + laneL) * (1.0 - zeb) * (1.0 - inter) + stripes + stopL * (1.0 - inter), 0.0, 1.0) * step(sk, ac);',
+      '    road = mix(road, vec3(0.60, 0.60, 0.58) * (0.78 + 0.25 * agg), mk * 0.92);',
+      /* pavement slabs a metre and a half square, a kerb of pale stone */
+      '    vec3 pav = vec3(0.43, 0.42, 0.40) * (0.88 + 0.22 * dirt + 0.10 * (fine.g - 0.5) * kAgg);',
+      '    float jt = max(1.0 - sqAA(al, 1.5, 0.94, fq), 1.0 - sqAA(ac, 1.5, 0.94, fq));',
+      '    pav *= 1.0 - 0.22 * jt;',
+      '    vec3 plaza = vec3(0.37, 0.36, 0.34) * (0.86 + 0.26 * dirt) * (1.0 - 0.16 * max(1.0 - sqAA(gq.x, 3.0, 0.97, fq), 1.0 - sqAA(gq.y, 3.0, 0.97, fq)));',
+      '    float court = step(h2(blk + 11.0), 0.14) * smoothstep(-2.5, -3.5, ac);',
+      '    plaza = mix(plaza, uCityPark * (0.70 + 0.45 * dirt) * (1.0 - 0.45 * smoothstep(0.55, 0.75, vn(gq * 0.11 + blk))), court);',
+      '    vec3 cc = mix(pav, road, clamp((ac - sk) / fq + 0.5, 0.0, 1.0));',
+      '    cc = mix(cc, vec3(0.58, 0.57, 0.54) * (0.85 + 0.2 * agg), bandAA(ac, sk - 0.18, sk, fq));',
+      /* the ring of blocks just short of the city keeps its own ground
+         inside the kerb: a park or a garden with a street round it */
+      '    float inB = clamp(-ac / fq + 0.5, 0.0, 1.0), built = step(uCity2.z, length(blk * uCity.z));',
+      '    cc = mix(cc, plaza, inB);',
+      '    c = mix(c, cc, zone * (1.0 - inB * (1.0 - built)));',
+      /* lamps every 26 m down each pavement, staggered across the street */
+      '    float la = (fract((al + 13.0 * step(0.0, ns ? sg.x : sg.y)) / 26.0) - 0.5) * 26.0, lx = ac - sk + 0.7;',
+      '    float r2 = la * la + lx * lx;',
+      '    pool = zone * step(-2.0, ac) * (exp(-r2 / 50.0) * 0.45 + exp(-r2 / 9.0) * 0.8);',
+      '  }',
       /* the kept ground: a lawn mown in stripes, pale gravel, a bare yard, or a
          damp bank. The stripes fade once finer than a pixel. */
       '  float inClear = clearAmt(vW);',
@@ -3660,6 +3732,7 @@ function buildTerrain(scene, P, R, U, H) {
       '  float diff = max(dot(N2, normalize(uSunDir)), 0.0);',
       '  vec3 light = bk.y * hemi(N2, uAmbCol * 1.15) + uSunCol * diff * 1.25 * sh;',
       '  vec3 lit = c * light;',
+      '  lit += c * vec3(1.0, 0.80, 0.56) * pool * uNight * 1.8;',
       /* looking into a low sun across grass, the blades glow with it */
       '  lit += uSunCol * uTip * pow(max(dot(normalize(vW - uCamPos), normalize(uSunDir)), 0.0), 4.0) * graze * fieldK * 0.35 * sh * (1.0 - uSnow);',
       '  vec3 Vw = normalize(uCamPos - vW), Rw = reflect(-Vw, vN);',
@@ -4881,6 +4954,30 @@ function buildCacti(scene, P, R, U, H, spec) {
       instanceSolid(scene, tpl, solids, mat);
     }
   }
+}
+
+/* The street grid a city is laid out on. The ground draws its streets from
+   it (buildTerrain) and the buildings stand on its blocks, so it is worked out
+   once, before either, from the params and a stream of its own. Blocks are
+   bw square, centred on multiples of the pitch in the grid's frame; a street
+   sw wide runs between them, a pavement sk wide down each side of it.
+   start/end: the ring of the city proper (the skyline seen from outside it
+   has a park, houses or a river in front). */
+function cityPlan(P) {
+  if (P._city !== undefined) return P._city;
+  var pent = P.biomeKey === 'penthouse';
+  if (!pent && P.biomeKey !== 'urban') { P._city = null; return null; }
+  var CR = RNG(P.base + '/city' + (P.nonce ? '/' + P.nonce : ''));
+  var ubw = CR.range(46, 72), usw = CR.range(15, 22), uga = CR.range(-0.6, 0.6);
+  var ustart = CR.range(230, 330), udepth = CR.range(380, 560);
+  var bw = pent ? P.blockW : ubw, sw = pent ? P.streetW : usw, ga = pent ? P.gridAngle : uga;
+  var C = { pent: pent, bw: bw, sw: sw, pitch: bw + sw, ga: ga, ca: Math.cos(ga), sa: Math.sin(ga),
+            sk: clamp(sw * 0.2, 3, 5), start: pent ? 0 : ustart, end: pent ? 1600 : ustart + udepth };
+  /* grid frame <-> world */
+  C.toWorld = function (gx, gz) { return [gx * C.ca - gz * C.sa, gx * C.sa + gz * C.ca]; };
+  C.toGrid = function (x, z) { return [x * C.ca + z * C.sa, -x * C.sa + z * C.ca]; };
+  P._city = C;
+  return C;
 }
 
 /* ---------- a city ----------
