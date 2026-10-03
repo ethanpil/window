@@ -2816,18 +2816,22 @@ function buildWorld(seed) {
   });
   shareCommon(scene);
 
-  updateWeather(App.t || 0);
-  applyShadowMap(bakeShadows(P, H, U.uSunDir.value));
-  FX.init(P, R);
-  Sound.reset(P);
+  /* This world's clock before the bake: baked under the last world's sun,
+     the map was thrown away and baked again on the first frame. The builder
+     stream draws these in the same order as before. */
   App.t = App.pendingT != null ? App.pendingT : R.range(0, 500);
   App.pendingT = null;
-
-  writeSeedToUrl(P.seed);                  /* now that the clock is set, the code is complete */
+  App._wxT = null;
   App.elapsed = 0;
   App.nextFlash = null; App.flash = 0; App.flashAgain = null;
   App.wetness = P.weather.rain > 0 ? 1 : (R.f() < 0.18 ? R.range(0.4, 1) : 0);
   App.bowTarget = 0; App.skyU.uBow.value = 0;
+  updateWeather(App.t);
+  applyShadowMap(bakeShadows(P, H, U.uSunDir.value));
+  FX.init(P, R);
+  Sound.reset(P);
+
+  writeSeedToUrl(P.seed);                  /* now that the clock is set, the code is complete */
   layout();
   updateHUD(P);
   updateWeather(App.t);
@@ -10845,7 +10849,11 @@ function updateWeather(t) {
   var behind = U.uSunDir.value.z;
   var bow = wet * smoothstep(0.03, 0.18, elevSin) * (1 - smoothstep(0.50, 0.78, elevSin))
           * clamp(lightMul * 1.5, 0, 1) * smoothstep(0.05, 0.45, behind) * (1 - night);
-  App.wetness = W.rain > 0.1 ? 1 : Math.max(0, (App.wetness || 0) - 0.0006);
+  /* the ground dries by the clock, as snow gathers (wdt, below), not by the
+     frame: it took 12 s on a fast screen and close to a minute on a slow one */
+  var wdt = App._wxT == null ? 0 : clamp(t - App._wxT, 0, 0.25);
+  App._wxT = t;
+  App.wetness = W.rain > 0.1 ? 1 : Math.max(0, (App.wetness || 0) - 0.036 * wdt);
   /* frozen ground is not wet */
   U.uWet.value = App.wetness * (1 - smoothstep(0.1, 0.4, U.uSnow.value));
   App.bowTarget = clamp(bow * 1.5, 0, 1);
@@ -10909,8 +10917,6 @@ function updateWeather(t) {
 
   /* snow gathers on the ground, and eases off if it stops. By the clock, not
      per frame, so a slow GPU does not get a slower snowfall */
-  var wdt = App._wxT == null ? 0 : clamp(t - App._wxT, 0, 0.25);
-  App._wxT = t;
   if (W.snow > 0) {
     U.uSnow.value += (snowTarget(W) - U.uSnow.value) * (1 - Math.exp(-wdt * 0.054));
   } else if (P.baseSnow) {
