@@ -7538,7 +7538,7 @@ function buildBridge(scene, P, R, U, H) {
   buildGlows(scene, U, glows);
   App._shadows.push([0, P.bridgeDeck, P.bridgeZ, P.bridgeSpan * 0.22, 0.75, 2]);
   buildTraffic(scene, P, R, U, {
-    x: 0, y: P.bridgeDeck + P.bridgeTh * 0.5, z: P.bridgeZ, len: P.bridgeRoad, dir: [1, 0],
+    x: 0, y: P.bridgeDeck + P.bridgeTh * 0.5 + 0.10, z: P.bridgeZ, len: P.bridgeRoad, dir: [1, 0],   /* the tarmac's top */
     lanes: [-P.bridgeW * 0.22, P.bridgeW * 0.22], rate: P.trafficRate, speed: [20, 25], lift: 1
   });
 }
