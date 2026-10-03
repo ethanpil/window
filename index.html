@@ -1117,8 +1117,8 @@ function buildParams(seedStr, nonce) {
     };
     /* a park is mown, and gardens nearly so (the flowers are thinned once
        they are counted, below) */
-    if (P.cityFront === 'park') P.grassHeight *= 0.35;
-    if (P.cityFront === 'houses') P.grassHeight *= 0.6;
+    if (P.cityFront === 'park') { P.grassHeight *= 0.35; P.flowerScale = 0.4; }
+    if (P.cityFront === 'houses') { P.grassHeight *= 0.6; P.flowerScale = 0.6; }
     P.hillAmp = Math.min(P.hillAmp, 3.2);      /* a city sits on level ground */
   }
   /* A worn way leading off: a footpath through grass, tramlines in a crop,
@@ -4332,7 +4332,7 @@ function buildFlowers(scene, P, R, U, H) {
       iPos[made * 3 + 1] = H(x, z);
       iPos[made * 3 + 2] = z;
       /* no swelling with distance: big far flowers read as pom-poms */
-      var sz = R.range(sp.size[0], sp.size[1]);
+      var sz = R.range(sp.size[0], sp.size[1]) * (P.flowerScale || 1);
       iAttr[made * 3] = sz;
       iAttr[made * 3 + 1] = x * 3.1 + z * 2.6 + R.range(-1.1, 1.1);
       iAttr[made * 3 + 2] = R.range(0.7, 1.25);
