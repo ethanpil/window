@@ -4628,6 +4628,15 @@ function solidMat(U, colour, opts) {
       '    float lf = vn3(q * 3.4) * 0.66 + mix(0.5, vn3(q * 9.0), k9) * 0.34;',
       '    float lich = smoothstep(0.54, 0.78, lf);',
       '    c = mix(c, uLichen * (0.4 + 0.6 * length(litC) / max(length(uBody), 0.05)), lich * upFace * 0.70);',
+      '  } else if (uGrain > 2.5) {',
+      /* foliage (a hedge): clumps of leaves at two scales with dark gaps
+         between them, new growth paler, each faded out as it nears a pixel */
+      '    vec3 q = vLocal * vec3(7.0, 9.0, 9.0) + vSeed * 3.1;',
+      '    float w = max(fwidth(q.x), max(fwidth(q.y), fwidth(q.z)));',
+      '    float k1 = 1.0 - smoothstep(0.30, 0.85, w), k2 = 1.0 - smoothstep(0.30, 0.85, w * 2.8);',
+      '    float leaf = mix(0.5, vn3(q), k1) * 0.6 + mix(0.5, vn3(q * 2.8 + 5.3), k2) * 0.4;',
+      '    c *= 0.58 + 0.80 * leaf;',
+      '    c = mix(c, c * uBody2 / max(uBody, vec3(0.02)), smoothstep(0.62, 0.92, leaf) * 0.45 * k1);',
       '  } else if (uGrain > 0.5) {',
       /* Bark is not a comb. This was a triangle wave at one fixed pitch with
          a slow wobble laid over it, every ridge the same width and the same
@@ -6545,6 +6554,71 @@ function boundaryStone(R) {
   pushBox(B, 0, 1.06, 0, 0.9, 0.06, 0.18, 0);            /* the capping course */
   return finishGeo(B);
 }
+/* A length of hedge, one unit long along x (a little over, so neighbours
+   overlap), one high, about half as deep: straight-sided, rounded on top,
+   its surface pushed in and out by a lumpy noise that repeats along its
+   length, so lengths laid end to end meet without a step. Light and leaf
+   come from solidMat's foliage grain. */
+function hedgeTemplate(R) {
+  var B = { pos: [], nor: [], idx: [], rib: [] };
+  var prof = [[-0.27, 0], [-0.30, 0.30], [-0.29, 0.62], [-0.22, 0.86], [-0.10, 0.98], [0, 1.0],
+              [0.10, 0.98], [0.22, 0.86], [0.29, 0.62], [0.30, 0.30], [0.27, 0]];
+  var rings = 9, L = 1.12, k, i;
+  var ph = [], fr = [];
+  for (k = 0; k < 4; k++) { ph.push(R.range(0, 6.283)); fr.push(R.int(1, 3)); }
+  for (i = 0; i <= rings; i++) {
+    var u = i / rings, x = (u - 0.5) * L;
+    for (k = 0; k < prof.length; k++) {
+      var a = k / (prof.length - 1);
+      /* periodic in u, so both ends of every length carry the same bumps */
+      var n = 0.07 * Math.sin(6.283 * fr[0] * u + ph[0] + a * 5.1) + 0.05 * Math.sin(6.283 * fr[1] * u + ph[1] + a * 9.7)
+            + 0.03 * Math.sin(6.283 * (fr[2] + 2) * u + ph[2] + a * 17.3);
+      var py = prof[k][1], pz = prof[k][0];
+      var top = smoothstep(0.5, 1.0, py);
+      B.pos.push(x, Math.max(py + n * top * 0.9, py > 0 ? 0.02 : 0), pz * (1 + n * 1.4));
+      B.nor.push(0, pz === 0 ? 1 : 0.4, pz);
+      B.rib.push(a);
+    }
+  }
+  var m = prof.length;
+  for (i = 0; i < rings; i++) for (k = 0; k < m - 1; k++) {
+    var a0 = i * m + k, b0 = a0 + m;
+    B.idx.push(a0, a0 + 1, b0, a0 + 1, b0 + 1, b0);
+  }
+  return finishGeo(B);
+}
+/* Hedges laid along lines as continuous lengths: lines is a list of
+   {x, z, ca, sa, half} (a point, the direction, the half length). Their own
+   stream, so they move nothing else. */
+function buildHedgeLines(scene, P, U, H, lines, hgt, HR) {
+  var forms = [hedgeTemplate(HR), hedgeTemplate(HR), hedgeTemplate(HR)], parts = [[], [], []];
+  for (var L = 0; L < lines.length; L++) {
+    var ln = lines[L], h = hgt * HR.range(0.85, 1.15), step = h * 0.98;
+    var gapAt = HR.range(0, 1), gapW = HR.range(0.02, 0.06);     /* a gate */
+    var ang = Math.atan2(ln.sa, ln.ca);
+    for (var t = -ln.half; t <= ln.half; t += step) {
+      var x = ln.x + ln.ca * t, z = ln.z + ln.sa * t;
+      if (z > -6) continue;
+      var d = Math.sqrt(x * x + z * z);
+      if (d < 12 || d > 430) continue;
+      if (Math.abs((t + ln.half) / (2 * ln.half) - gapAt) < gapW) continue;
+      if (P.waterY != null && H(x, z) < P.waterY + 0.3) continue;
+      if (P.pathKind && onPathAt(P, x, z) > 0.3) continue;
+      if (P.clearKind && clearAt(P, x, z + 1.5) > 0) continue;
+      if (slopeAt(H, x, z) > 0.55) continue;
+      var y = Math.min(H(x - ln.ca * step * 0.5, z - ln.sa * step * 0.5), H(x + ln.ca * step * 0.5, z + ln.sa * step * 0.5)) - 0.08;
+      /* the height wanders slowly along the line; whole lengths are dealt
+         from a few forms, turned end for end */
+      var sy = 1 + 0.12 * Math.sin(t * 0.045 + L * 1.7) + HR.range(-0.04, 0.04);
+      parts[HR.int(0, 2)].push([x, y, z, h, ang + (HR.f() < 0.5 ? Math.PI : 0), sy, 1]);
+      if (d < 240) App._shadows.push([x, y, z, h * 0.45, 0.7, h * 0.9]);
+    }
+  }
+  var col = new THREE.Color(P.seasonKey === 'winter' ? '#3f4430' : (P.seasonKey === 'autumn' ? '#4c4a2a' : '#34482a')).multiplyScalar(P.treeTint || 1);
+  var mat = solidMat(U, '#' + col.getHexString(), { rib: 0, grain: 3, spines: 0, aoH: 0.5,
+    body2: P.seasonKey === 'autumn' ? '#7a5a2c' : '#5b6e3a' });
+  for (var f = 0; f < 3; f++) if (parts[f].length) instanceSolid(scene, forms[f], parts[f], mat);
+}
 function buildBoundaries(scene, P, R, U, H) {
   if (P.waterY != null && P.biome.terrain === 'cascade') return;
   var opts = [];
@@ -6564,13 +6638,14 @@ function buildBoundaries(scene, P, R, U, H) {
   if (R.f() < 0.7) for (var j = 0; j < R.int(1, 2); j++)
     lines.push({ a: mainA + Math.PI / 2 + R.range(-0.22, 0.22), d: R.range(30, 240) * (R.f() < 0.5 ? -1 : 1) });
 
-  var posts = [], rails = [], stones = [], bushes = [], trees = [];
+  var posts = [], rails = [], stones = [], bushes = [], trees = [], hedges = [];
   for (var L = 0; L < lines.length; L++) {
     var ln = lines[L], ca = Math.cos(ln.a), sa = Math.sin(ln.a);
     /* the line's own origin, offset sideways from the window */
     var ox = -sa * ln.d, oz = ca * ln.d;
     var step = kind === 'fence' ? 2.6 : (kind === 'wall' ? 1.7 : (kind === 'shelter' ? 7.5 : 2.1));
     var half = R.range(120, 340);
+    if (kind === 'hedge') hedges.push({ x: ox, z: oz, ca: ca, sa: sa, half: half });
     var gapAt = R.range(0, 1), gapW = R.range(0.03, 0.09);   /* a gate or a gap */
     for (var t = -half; t <= half; t += step) {
       var x = ox + ca * t, z = oz + sa * t;
@@ -6595,9 +6670,9 @@ function buildBoundaries(scene, P, R, U, H) {
       } else if (kind === 'shelter') {
         trees.push([jx, jz, R.range(6, 13)]);
       } else {
-        bushes.push([jx, jz, R.range(1.5, 2.9)]);
+        bushes.push([jx, jz, R.range(1.5, 2.9)]);     /* drawn only to keep the stream in step */
       }
-      if (d < 240 && (kind === 'wall' || kind === 'hedge' || kind === 'shelter'))
+      if (d < 240 && (kind === 'wall' || kind === 'shelter'))
         App._shadows.push([x, y, z, kind === 'shelter' ? 2.6 : 1.0, 0.7, kind === 'shelter' ? 8 : 1.6]);
     }
   }
@@ -6607,9 +6682,25 @@ function buildBoundaries(scene, P, R, U, H) {
     instanceSolid(scene, boundaryPost(R), posts, wm);
     if (rails.length) instanceSolid(scene, boundaryRail(R), rails, wm);
   }
-  if (stones.length) instanceSolid(scene, boundaryStone(R), stones,
-    solidMat(U, R.pick(['#8b8578', '#7d7a70', '#948d7e', '#6f6a60']), { rib: 0, grain: 2, spines: 0, body2: '#9a9488', lichen: '#9aa15a' }));
-  if (bushes.length) boundaryBillboards(scene, P, R, U, H, bushes, 'hedge');
+  if (stones.length) {
+    /* one wall template stamped every 1.7 m read as a pattern: deal the
+       lengths out from four, turned end for end at random */
+    var WR = RNG(P.base + '/build/walls' + (P.nonce ? '/' + P.nonce : ''));
+    var stoneTpl = boundaryStone(R), wforms = [stoneTpl, boundaryStone(WR), boundaryStone(WR), boundaryStone(WR)];
+    var wparts = [[], [], [], []];
+    for (var si = 0; si < stones.length; si++) {
+      var st = stones[si];
+      if (WR.f() < 0.5) st[4] += Math.PI;
+      wparts[WR.int(0, 3)].push(st);
+    }
+    var wmat = solidMat(U, R.pick(['#8b8578', '#7d7a70', '#948d7e', '#6f6a60']), { rib: 0, grain: 2, spines: 0, body2: '#9a9488', lichen: '#9aa15a' });
+    for (var wf = 0; wf < 4; wf++) if (wparts[wf].length) instanceSolid(scene, wforms[wf], wparts[wf], wmat);
+  }
+  if (bushes.length) {
+    /* a hedge is a continuous bank of leaves, not bushes in a row */
+    var HRb = RNG(P.base + '/build/hedges' + (P.nonce ? '/' + P.nonce : ''));
+    buildHedgeLines(scene, P, U, H, hedges, HRb.range(1.5, 2.6), HRb);
+  }
   if (trees.length) boundaryBillboards(scene, P, R, U, H, trees, P.seasonKey === 'winter' ? 'broadleaf' : (R.f() < 0.5 ? 'pine' : 'broadleaf'));
 }
 /* A low stone wall along the far edge of a gravel terrace: the line where
@@ -6668,7 +6759,7 @@ function propBillboardMat(U, map, sway, aspect, kind) {
       uMap: { value: map }, uSway: { value: sway }, uAspect: { value: aspect || 1.0 },
       uCrown: { value: spriteCrown(kind) }
     },
-    alphaTest: 0.25, side: THREE.DoubleSide,
+    alphaToCoverage: true, alphaTest: 0.25, side: THREE.DoubleSide,
     vertexShader: [
       'attribute vec3 iPos; attribute vec2 iAttr;',
       'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uSway, uAspect;',
@@ -6840,7 +6931,7 @@ function buildHerd(scene, P, R, U, H) {
       uMap: { value: makeHerdTexture(kind, Hd) },
       uGraze: { value: Hd.graze }, uSpeed: { value: Hd.speed }, uFoot: { value: Hd.foot }
     },
-    alphaTest: 0.25, side: THREE.DoubleSide,
+    alphaToCoverage: true, alphaTest: 0.25, side: THREE.DoubleSide,
     vertexShader: [
       'attribute vec3 iPos; attribute vec4 iAttr; attribute vec2 iGrad;',
       'uniform float uTime, uFogDensity, uShadow, uGraze, uSpeed, uFoot;',
@@ -7858,6 +7949,20 @@ function buildProps(scene, P, R, U, H) {
     if (spec.kind === 'blocks') { buildBlocks(scene, P, R, U, H); continue; }
     if (spec.kind === 'bridge') { buildBridge(scene, P, R, U, H); continue; }
     if (spec.kind === 'rock') { buildRocks(scene, P, R, U, H, spec); continue; }
+    if (spec.kind === 'hedge') {
+      /* Hedgerows round the fields, square to the crop rows: these were bushes
+         snapped onto the rows and stood in the crop like shrubs. The count
+         was bushes; a few metres of hedge apiece. */
+      var HR = RNG(P.base + '/build/hedgerows/' + si + (P.nonce ? '/' + P.nonce : ''));
+      var hl = [], hA = P.rowAngle || HR.range(-0.4, 0.4), nH = clamp(Math.round(spec.count / 45), 2, 6);
+      for (var hi = 0; hi < nH; hi++) {
+        var across = hi % 2 === 1, a2 = hA + (across ? Math.PI / 2 : 0) + HR.range(-0.05, 0.05);
+        var off = HR.range(35, 260) * (HR.f() < 0.5 ? -1 : 1);
+        hl.push({ x: HR.range(-0.6, 0.6) * Math.abs(off), z: -40 - Math.abs(off), ca: Math.cos(a2), sa: Math.sin(a2), half: HR.range(90, 300) });
+      }
+      buildHedgeLines(scene, P, U, H, hl, HR.range(spec.size[0], spec.size[1]), HR);
+      continue;
+    }
     var items = [];
     var guard = 0;
     var lineR = spec.line ? R.range(spec.r[0], spec.r[1]) : 0;
