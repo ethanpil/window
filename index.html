@@ -1115,8 +1115,10 @@ function buildParams(seedStr, nonce) {
       cb: fpick.cb ? seasonHex(fpick.cb, SEA, 1) : null,
       ct: fpick.ct ? seasonHex(fpick.ct, SEA, 1) : null
     };
-    if (P.cityFront === 'park') { P.coverH = [0.06, 0.14]; P.flowerCount = Math.round(P.flowerCount * 0.5); }
-    if (P.cityFront === 'houses') { P.coverH = [0.10, 0.24]; P.flowerCount = Math.round(P.flowerCount * 0.7); }
+    /* a park is mown, and gardens nearly so (the flowers are thinned once
+       they are counted, below) */
+    if (P.cityFront === 'park') P.grassHeight *= 0.35;
+    if (P.cityFront === 'houses') P.grassHeight *= 0.6;
     P.hillAmp = Math.min(P.hillAmp, 3.2);      /* a city sits on level ground */
   }
   /* A worn way leading off: a footpath through grass, tramlines in a crop,
@@ -1385,6 +1387,9 @@ function buildParams(seedStr, nonce) {
   } else {
     P.flowerCount = (B.flowers && !R.chance(0.12)) ? R.int(500, 1900) : 0;
     P.flowerCount = Math.round(P.flowerCount * SEA.flowers);
+    /* a few daisies in a mown park lawn, rather more in the gardens */
+    if (P.cityFront === 'park') P.flowerCount = Math.round(P.flowerCount * 0.2);
+    if (P.cityFront === 'houses') P.flowerCount = Math.round(P.flowerCount * 0.5);
     P.species = [R.pick(FLOWERS)];
     if (R.chance(0.55)) {
       var s2 = R.pick(FLOWERS);
