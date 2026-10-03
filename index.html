@@ -5382,6 +5382,11 @@ function instanceSolid(scene, tpl, items, mat) {
   geo.userData.shape = tpl.userData && tpl.userData.shape;
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
+  /* never thinned by the quality governor (applyQuality): a house, a pole,
+     a wall's stone, a tower's tank, a rock each has its shadow baked and
+     often a partner mesh (the pole's wires, the trunk's crown), so dropping
+     the tail of the list left wires on nothing and shadows of nothing */
+  m.userData.noTrim = true;
   scene.add(m);
   App.propMeshes.push(m);
   return m;
@@ -6004,6 +6009,7 @@ function cityMesh(scene, P, R, U, items) {
   });
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
+  m.userData.noTrim = true;              /* nearest first: trimming dropped the far towers whole */
   scene.add(m);
   App.propMeshes.push(m);
 }
@@ -6585,6 +6591,7 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
   });
   var m = new THREE.Mesh(geo, cmat);
   m.frustumCulled = false;
+  m.userData.noTrim = true;              /* the trunks are solids and keep all their crowns */
   scene.add(m);
   App.propMeshes.push(m);
 }
@@ -7695,6 +7702,7 @@ function buildGlows(scene, U, pts) {
   });
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
+  m.userData.noTrim = true;              /* the beacons are last in the list: trimming put them out first */
   m.renderOrder = 8;
   scene.add(m);
   App.propMeshes.push(m);
@@ -8267,6 +8275,7 @@ function boundaryBillboards(scene, P, R, U, H, items, kind) {
   var mat = propBillboardMat(U, makePropTexture(kind, P, R, { far: true }), kind === 'hedge' ? 0.02 : 0.03, spriteAspect(kind), kind);
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
+  m.userData.noTrim = true;              /* a thinned hedge or fence comes out dashed */
   scene.add(m);
   App.propMeshes.push(m);
 }
@@ -11827,7 +11836,7 @@ function applyQuality() {
   var mul = [1, 1, 0.72, 0.5][App.quality];
   var soft = lerp(1, 0.6, App.quality / 3);
   var trim = function (mesh, factor) {
-    if (!mesh || !mesh.geometry.attributes.iPos) return;
+    if (!mesh || mesh.userData.noTrim || !mesh.geometry.attributes.iPos) return;
     if (mesh.userData.full == null) mesh.userData.full = mesh.geometry.instanceCount;
     mesh.geometry.instanceCount = Math.max(1, Math.floor(mesh.userData.full * factor));
   };
