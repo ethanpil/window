@@ -7622,7 +7622,7 @@ function updateWeather(t) {
   /* haze thickens and thins */
   U.uFogDensity.value = W.fogD * P.hazeMul * (0.72 + 0.55 * mood);
   /* the glow in the haze toward the sun needs a sun to glow from */
-  U.uHazeK.value = clamp(lightMul * 1.15, 0, 1) * (0.3 + 0.7 * (1 - W.cover));
+  U.uHazeK.value = clamp(lightMul * 1.15, 0, 1) * (0.3 + 0.7 * W.cover);   /* cover is high for a clear sky */
   /* a rainbow needs rain in the air, a low sun, and the sun behind the window */
   /* the bow is a circle of 42 degrees around the point opposite the sun, so it
      shows only when the sun is behind the window and low enough to lift that
