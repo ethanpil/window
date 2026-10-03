@@ -3388,6 +3388,11 @@ function buildTerrain(scene, P, R, U, H) {
     /* a heather moor is a carpet of bushes: the drawn ones are too few to
        hide the ground, so close in the ground takes their colour too */
     uCoverNear: { value: P.coverStyle === 'heather' ? 0.6 : 0.0 },
+    /* farmed country: fields, hedge lines and woods drawn into the far ground */
+    uPatch: { value: { meadow: 1, farmland: 1, hayfield: 1, river: 1, lakefront: 1, flowerfield: 1, autumn: 1,
+      blossom: 1, bridge: 1, cliffcoast: 1, lavender: 1 }[P.biomeKey] ? 1.0 : 0.0 },
+    uDryC: { value: new THREE.Color(P.grass.dry) },
+    uWoodCol: { value: new THREE.Color(P.leafDark || '#2c3a24').multiplyScalar(0.75 * (P.treeTint || 1)) },
     uCoverMinY: { value: P.waterY != null ? P.waterY + Math.max(P.coverMinH || -1, P.coverWet ? -0.30 : 0.25) : -1e6 },
     uCamPos: U.uCamPos,
     uRock: { value: new THREE.Color(P.rockCol) },
@@ -3447,7 +3452,7 @@ function buildTerrain(scene, P, R, U, H) {
     fragmentShader: [
       GLSL_TONE,
       'uniform sampler2D uTex; uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uSnowCol, uTip;',
-      'uniform vec3 uRock, uHigh, uCoverCol; uniform float uCoverK, uCoverMinY, uCoverNear;',
+      'uniform vec3 uRock, uHigh, uCoverCol, uDryC, uWoodCol; uniform float uCoverK, uCoverMinY, uCoverNear, uPatch;',
       'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uBeach, uSwash, uPaddy, uStepH, uRowSp, uPuddle;',
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uStrataLo, uStrataHi;',
@@ -3484,7 +3489,16 @@ function buildTerrain(scene, P, R, U, H) {
       'void main(){',
       '  if (vW.z > -0.18) discard;                       /* nothing of the outside exists indoors */',
       '  vec3 c = texture2D(uTex, vW.xz * 0.038).rgb;',
-      '  c = mix(c, texture2D(uTex, vW.xz * 0.0052 + vec2(0.31)).rgb, 0.5);',
+      /* the broad octave turned through an irrational angle and shifted, so
+         its repeats never line up with the fine one's; and a third, a
+         kilometre and a half across, for drier and lusher stretches */
+      '  vec2 rxz = vec2(vW.x * 0.8269 - vW.z * 0.5623, vW.x * 0.5623 + vW.z * 0.8269);',
+      '  vec3 c2 = texture2D(uTex, rxz * 0.0052 + vec2(0.31, 0.17)).rgb;',
+      '  c = mix(c, c2, 0.5);',
+      '  vec3 cM = texture2D(uTex, vW.zx * 0.0007 + vec2(0.17, 0.53)).rgb;',
+      '  float macro = clamp((cM.g - c2.g) * 1.6, -0.12, 0.12);',
+      '  c *= 1.0 + macro;',
+      '  c = mix(c, c * vec3(1.06, 1.01, 0.86), clamp(macro * 6.0, 0.0, 1.0) * 0.5);',
       /* close up, a third octave of grain so the foreground is not a smooth wash */
       '  float near = 1.0 - smoothstep(6.0, 26.0, length(uCamPos - vW));',
       /* sampled unconditionally: inside a per-pixel branch the mip level is
@@ -3519,6 +3533,26 @@ function buildTerrain(scene, P, R, U, H) {
       '  vec3 favg = (uFlw0 + uFlw1 + uFlw2) / 3.0;',
       '  float fOn = mix(0.32, step(0.68, fh), kF) * fPatch * smoothstep(14.0, 26.0, dC);',
       '  c = mix(c, mix(favg, fcol, kF) * (0.75 + 0.25 * c.g / max(c.g, 0.05)), fOn * 0.7);',
+      /* Farmed country from a distance is a patchwork: fields of different
+         crops and states inside hedge lines, and woods in the valleys and on
+         the slopes too steep to plough. Parcels on a warped grid; the hedge
+         lines fade out once they are finer than a pixel. */
+      '  float slope0 = clamp(1.0 - vN.y, 0.0, 1.0);',
+      '  if (uPatch > 0.5) {',
+      '    float pk = smoothstep(110.0, 260.0, length(vW.xz)) * grows;',
+      '    vec2 pr = vec2(vW.x * 0.866 - vW.z * 0.5, vW.x * 0.5 + vW.z * 0.866) / 130.0;',
+      '    pr += (cM.rb + c2.gr) * 0.7;',
+      '    vec2 cell = floor(pr), fc2 = fract(pr);',
+      '    float tC = h2(cell + 3.7);',
+      '    vec3 tone = tC < 0.30 ? uCoverCol * 0.80 : (tC < 0.50 ? mix(uCoverCol, uDryC, 0.7) : (tC < 0.62 ? uPathCol * 0.92 : uCoverCol * 1.06));',
+      '    float edge = min(min(fc2.x, 1.0 - fc2.x), min(fc2.y, 1.0 - fc2.y));',
+      '    float wE = fwidth(pr.x) + fwidth(pr.y);',
+      '    float kE = 1.0 - smoothstep(0.30, 0.85, wE * 40.0);',
+      '    float hedgeL = (1.0 - smoothstep(0.004, 0.012 + wE, edge)) * kE;',
+      '    float wood = smoothstep(0.66, 0.80, (cM.g + c2.b) * 0.9 + slope0 * 1.4);',
+      '    c = mix(c, tone * (0.85 + 0.3 * c.g / max(c.g, 0.05)), pk * 0.42);',
+      '    c = mix(c, uWoodCol * (0.75 + 0.5 * c2.g), pk * max(hedgeL * 0.75, wood * 0.85));',
+      '  }',
       '  float far = smoothstep(30.0, 240.0, length(vW.xz));',
       '  c = mix(c, mix(c, uTip * 0.82, 0.35), far);',
       /* bumpiness close in. Sampled unconditionally — inside a branch the mip
@@ -3569,10 +3603,36 @@ function buildTerrain(scene, P, R, U, H) {
       '    c = mix(c, c * tint * (0.90 + 0.24 * tone2), on * 0.80);',
       '    c *= 1.0 - 0.20 * edge * on;',
       '  }',
-      '  float slope = clamp(1.0 - vN.y, 0.0, 1.0);',
-      '  c = mix(c, uRock * (0.85 + 0.3 * texture2D(uTex, vW.xz * 0.02).r),',
-      '          smoothstep(uRockLine, uRockLine + 22.0, vW.y) * (0.35 + 0.65 * smoothstep(0.12, 0.5, slope)));',
-      '  c = mix(c, uRock * 0.92, smoothstep(0.45, 0.78, slope) * 0.75);',
+      '  float slope = slope0;',
+      /* Rock. Soil does not hold much past forty degrees, so steep ground is
+         bare rock wherever it is, and above the rock line on gentler slopes
+         too; below steep faces the rubble they shed lies as paler scree.
+         The rock is textured from the side (two taps, blended by which way
+         the face looks) instead of the ground texture stretched down it,
+         with gullies running down the fall line and darker joints. */
+      '  float steep = smoothstep(0.17, 0.34, slope + (c2.g - cM.g) * 0.5);',
+      '  float high = smoothstep(uRockLine - 8.0, uRockLine + 22.0, vW.y);',
+      '  float rockW = max(steep * 0.92, high * (0.35 + 0.65 * smoothstep(0.08, 0.28, slope)));',
+      '  vec3 Na = abs(vN);',
+      /* stretched down the fall line (v small), so the side taps draw gullies */
+      '  vec2 bx = texture2D(uTex, vW.zy * vec2(0.031, 0.012) + vec2(0.4, 0.1)).gr;',
+      '  vec2 bz = texture2D(uTex, vW.xy * vec2(0.031, 0.012) + vec2(0.7, 0.3)).gr;',
+      '  vec2 bb = mix(bz, bx, Na.x / (Na.x + Na.z + 1e-3));',
+      '  float rmod = bb.x;',
+      '  float gully = smoothstep(0.08, 0.2, bb.x - bb.y);',
+      '  vec3 rockC = uRock * (0.70 + 0.65 * rmod) * (1.0 - 0.26 * gully) * (1.0 - 0.22 * smoothstep(0.42, 0.22, rmod));',
+      '  c = mix(c, rockC, rockW);',
+      '  float scree = smoothstep(0.05, 0.13, slope) * (1.0 - steep) * max(high, smoothstep(uRockLine - 40.0, uRockLine, vW.y) * 0.6) * step(uRockLine, 1e5);',
+      '  c = mix(c, uRock * 1.12 * (0.82 + 0.36 * dirt), scree * 0.55);',
+      /* the rock has relief: a gentle bump from the same side texture, by
+         its screen-space slope (no extra fetch), only where rock shows */
+      '  vec3 dpx = dFdx(vW), dpy = dFdy(vW);',
+      '  float hb = rmod * 7.0;',
+      '  vec3 r1 = cross(dpy, vN), r2 = cross(vN, dpx);',
+      '  float det = dot(dpx, r1);',
+      '  vec3 sg = sign(det) * (dFdx(hb) * r1 + dFdy(hb) * r2);',
+      '  vec3 Nb = normalize(abs(det) * vN - sg);',
+      '  N2 = normalize(mix(N2, Nb, rockW * 0.8 * step(1e-9, abs(det))));',
       '  c = mix(c, uHigh, smoothstep(uSnowLine, uSnowLine + 34.0, vW.y) * (1.0 - smoothstep(0.30, 0.62, slope)));',
       /* The shore. Ground the water has just left, or laps over, is dark with
          it and takes a sheen of sky (below), in a band whose width wanders
