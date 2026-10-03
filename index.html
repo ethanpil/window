@@ -5443,13 +5443,17 @@ function buildBridge(scene, P, R, U, H) {
   instanceSolid(scene, geo, [[0, P.bridgeDeck, P.bridgeZ, 1, 0, 1, 1]], mat);
   App._shadows.push([0, P.bridgeDeck, P.bridgeZ, P.bridgeSpan * 0.22, 0.75, 2]);
   buildTraffic(scene, P, R, U, {
-    y: P.bridgeDeck + P.bridgeTh * 0.5, z: P.bridgeZ, len: P.bridgeRoad,
-    lanes: [-P.bridgeW * 0.22, P.bridgeW * 0.22], axis: 'x', rate: P.trafficRate
+    x: 0, y: P.bridgeDeck + P.bridgeTh * 0.5, z: P.bridgeZ, len: P.bridgeRoad, dir: [1, 0],
+    lanes: [-P.bridgeW * 0.22, P.bridgeW * 0.22], rate: P.trafficRate, speed: [20, 25]
   });
 }
 
 /* Vehicles: a stream travelling along a line. Each one's position comes from
    its own offset plus time, so they space out, pass each other, and never stop. */
+/* Vehicles along a straight road through o.x, o.z running along o.dir (a
+   unit vector in the ground plane), o.len long, one lane at each offset in
+   o.lanes across it. Speeds are in metres a second, one per lane, so cars in
+   a lane never run through each other. */
 function buildTraffic(scene, P, R, U, o) {
   var perLane = Math.max(3, Math.round(o.rate * 7));
   var lanes = o.lanes.length, N = perLane * lanes;
@@ -5462,6 +5466,7 @@ function buildTraffic(scene, P, R, U, o) {
   var carCols = ['#c8ccd0', '#2f3438', '#8d2f2a', '#2c4a72', '#c9a23a', '#3e6b46', '#d8d2c4', '#6a6d70'];
   var m = 0;
   for (var L = 0; L < lanes; L++) {
+    var laneSpeed = R.range(o.speed[0], o.speed[1]);
     for (var i = 0; i < perLane; i++) {
       var truck = R.f() < 0.22;
       iAttr[m * 4] = truck ? R.range(7, 12) : R.range(3.6, 5.2);     /* length */
@@ -5472,7 +5477,7 @@ function buildTraffic(scene, P, R, U, o) {
       iCol[m * 3] = c.r; iCol[m * 3 + 1] = c.g; iCol[m * 3 + 2] = c.b;
       iLane[m * 4] = o.lanes[L];
       iLane[m * 4 + 1] = L % 2 === 0 ? 1 : -1;                          /* which way it goes */
-      iLane[m * 4 + 2] = R.range(0.82, 1.18);                           /* its own speed */
+      iLane[m * 4 + 2] = laneSpeed;                                     /* metres a second */
       iLane[m * 4 + 3] = truck ? 1 : 0;
       m++;
     }
@@ -5481,40 +5486,42 @@ function buildTraffic(scene, P, R, U, o) {
   geo.setAttribute('iCol', new THREE.InstancedBufferAttribute(iCol, 3));
   geo.setAttribute('iLane', new THREE.InstancedBufferAttribute(iLane, 4));
   geo.instanceCount = N;
-  var alongX = o.axis === 'x';
   var mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol,
       uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uCamPos: U.uCamPos,
       uShadow: U.uShadow, uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale,
       uNight: App.skyU.uNight,
-      uOrigin: { value: new THREE.Vector3(alongX ? 0 : o.x, o.y, o.z) },
-      uLen: { value: o.len }, uSpeed: { value: 0.020 }, uAlongX: { value: alongX ? 1 : 0 }
+      uOrigin: { value: new THREE.Vector3(o.x || 0, o.y, o.z) },
+      uDir: { value: new THREE.Vector2(o.dir[0], o.dir[1]).normalize() },
+      uLen: { value: o.len }
     },
+    extensions: { derivatives: true },
     vertexShader: [
       'attribute vec4 iAttr; attribute vec3 iCol; attribute vec4 iLane;',
-      'uniform float uTime, uFogDensity, uLen, uSpeed, uShadow, uAlongX, uNight;',
+      'uniform float uTime, uFogDensity, uLen, uShadow, uNight;',
+      'uniform vec2 uDir;',
       'uniform vec3 uOrigin, uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
-      'varying vec3 vCol; varying float vFog; varying vec3 vHaze; varying float vLamp;',
+      'varying vec3 vCol; varying float vFog; varying vec3 vHaze; varying vec3 vLoc; varying float vEnd;',
       GLSL_COMMON,
       'void main(){',
       '  float dir = iLane.y;',
-      '  float u = fract(iAttr.w + uTime * uSpeed * iLane.z * dir + 1.0);',
+      '  float u = fract(iAttr.w + uTime * iLane.z / uLen * dir + 1.0);',
       '  float along = (u - 0.5) * uLen;',
-      '  vec3 wp = uOrigin;',
-      '  if (uAlongX > 0.5) { wp.x += along; wp.z += iLane.x; } else { wp.z += along; wp.x += iLane.x; }',
-      '  vec3 lp = position * vec3(uAlongX > 0.5 ? iAttr.x : iAttr.z, iAttr.y, uAlongX > 0.5 ? iAttr.z : iAttr.x);',
+      '  vec2 across = vec2(-uDir.y, uDir.x);',
+      /* the car is built along local x, then turned onto the road */
+      '  vec3 lp = position * vec3(iAttr.x, iAttr.y, iAttr.z);',
       '  lp.y += iAttr.y * 0.5;',
-      '  vec3 p = wp + lp;',
-      '  vec3 n = normalize(vec3(normal.x, normal.y, normal.z));',
+      '  vec2 xz = uOrigin.xz + uDir * (along + lp.x) + across * (iLane.x + lp.z);',
+      '  vec3 p = vec3(xz.x, uOrigin.y + lp.y, xz.y);',
+      '  vec2 nxz = uDir * normal.x + across * normal.z;',
+      '  vec3 n = normalize(vec3(nxz.x, normal.y, nxz.y));',
       '  float diff = max(dot(n, normalize(uSunDir)), 0.0);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime));',
+      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(xz, uTime));',
       '  vCol = iCol * (uAmbCol * 1.1 + uSunCol * (0.35 + diff * 0.9) * sh);',
-      /* a headlight and a tail light, brightening after dark */
-      '  vLamp = 0.0;',
-      '  float endFace = (uAlongX > 0.5 ? normal.x : normal.z) * dir;',
-      '  if (endFace > 0.5) vLamp = uNight * 1.6;',
-      '  if (endFace < -0.5) vLamp = uNight * 0.7;',
+      /* which end this face is: +1 the front, -1 the back, 0 a side */
+      '  vEnd = normal.x * dir;',
+      '  vLoc = position;',
       '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
       '  vFog = fogAmt(-mv.z, uFogDensity);',
       '  vHaze = hazeToward(uFogCol, normalize(p - cameraPosition), uSunDir, uSunCol);',
@@ -5523,9 +5530,18 @@ function buildTraffic(scene, P, R, U, o) {
     ].join('\n'),
     fragmentShader: [
       GLSL_TONE,
-      'varying vec3 vCol; varying float vFog; varying vec3 vHaze; varying float vLamp;',
+      'uniform float uNight;',
+      'varying vec3 vCol; varying float vFog; varying vec3 vHaze; varying vec3 vLoc; varying float vEnd;',
       'void main(){',
-      '  vec3 c = vCol + vec3(1.0, 0.93, 0.78) * vLamp * 0.6 + vec3(1.0, 0.25, 0.15) * max(vLamp - 1.0, 0.0);',
+      /* A pair of lamps at each end, near the corners: warm white headlights
+         in front, red tail lights behind. Once a lamp is under a pixel it
+         fades to its share of the end face, so it cannot flicker. */
+      '  vec2 q = vec2((abs(vLoc.z) - 0.33) / 0.11, (vLoc.y + 0.05) / 0.09);',
+      '  float d = length(q), fw = fwidth(d);',
+      '  float spot = 1.0 - smoothstep(0.7 - fw, 1.0 + fw, d);',
+      '  spot = mix(spot, 0.12, smoothstep(0.6, 2.5, fw));',
+      '  float front = smoothstep(0.5, 0.9, vEnd), back = smoothstep(0.5, 0.9, -vEnd);',
+      '  vec3 c = vCol + (vec3(1.0, 0.92, 0.76) * 2.2 * front + vec3(1.0, 0.10, 0.06) * 1.4 * back) * spot * uNight;',
       '  gl_FragColor = vec4(tone(mix(c, vHaze, vFog)), 1.0);',
       '}'
     ].join('\n')
@@ -5563,12 +5579,15 @@ function buildBlocks(scene, P, R, U, H) {
   }
   cityMesh(scene, P, R, U, items);
   buildRoofs(scene, P, R, U, items);
-  /* traffic in the two streets nearest the window */
+  /* Traffic in the two streets nearest the window. The streets run along the
+     grid's own z, half a pitch either side of the block in front, so the road
+     and its direction are turned with the grid; driving along world z put
+     the cars through the blocks whenever the grid was turned. */
   for (var lane = -1; lane <= 1; lane += 2) {
-    var off = lane * pitch * 0.5;
+    var off = lane * pitch * 0.5, lz0 = -1.5 * pitch;
     buildTraffic(scene, P, R, U, {
-      x: off * ca, y: -P.storey + 0.4, z: -pitch * 1.5 + off * sa, len: pitch * 16,
-      lanes: [-sw * 0.18, sw * 0.18], axis: 'z', rate: P.trafficRate
+      x: off * ca - lz0 * sa, y: -P.storey + 0.4, z: off * sa + lz0 * ca, len: pitch * 16,
+      dir: [-sa, ca], lanes: [-sw * 0.18, sw * 0.18], rate: P.trafficRate, speed: [11, 14]
     });
   }
 }
