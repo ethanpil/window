@@ -3015,6 +3015,10 @@ function buildTerrain(scene, P, R, U, H) {
     uTip: { value: new THREE.Color(P.grass.tip) },
     uCoverCol: { value: new THREE.Color(P.grass.cb || P.grass.base)
       .lerp(new THREE.Color(P.grass.ct || P.grass.tip), 0.62) },
+    /* how much of the ground the blades actually hide, and the lowest ground
+       they grow on: the far field only takes the plant colour where plants are */
+    uCoverK: { value: clamp((P.coverCount || 0) / 26000, 0, 1) },
+    uCoverMinY: { value: P.waterY != null ? P.waterY + Math.max(P.coverMinH || -1, P.coverWet ? -0.30 : 0.25) : -1e6 },
     uCamPos: U.uCamPos,
     uRock: { value: new THREE.Color(P.rockCol) },
     uHigh: { value: new THREE.Color(P.highCol) },
@@ -3061,7 +3065,7 @@ function buildTerrain(scene, P, R, U, H) {
     fragmentShader: [
       GLSL_TONE,
       'uniform sampler2D uTex; uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uSnowCol, uTip;',
-      'uniform vec3 uRock, uHigh, uCoverCol;',
+      'uniform vec3 uRock, uHigh, uCoverCol; uniform float uCoverK, uCoverMinY;',
       'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uWet, uPaddy, uRowSp;',
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uStrataLo, uStrataHi;',
@@ -3097,7 +3101,8 @@ function buildTerrain(scene, P, R, U, H) {
       /* hand over from blades to ground across the band where the blades are
          shrinking away, so there is no seam */
       '  float handover = smoothstep(11.0, 34.0, length(uCamPos - vW));',
-      '  c = mix(c, uCoverCol * (0.72 + 0.5 * c.g), handover * 0.80);',
+      '  float grows = uCoverK * smoothstep(uCoverMinY - 0.2, uCoverMinY + 0.3, vW.y);',
+      '  c = mix(c, uCoverCol * (0.72 + 0.5 * c.g), handover * 0.80 * grows);',
       '  float far = smoothstep(30.0, 240.0, length(vW.xz));',
       '  c = mix(c, mix(c, uTip * 0.82, 0.35), far);',
       /* bumpiness close in. Sampled unconditionally — inside a branch the mip
