@@ -1486,9 +1486,10 @@ function hexToRgb(hex) {
   return [c.r * 255, c.g * 255, c.b * 255];
 }
 
-function makeCloudTexture(seed, size) {
+function makeCloudTexture(seed, size, puffy) {
   var S = size || 256;
   var f = tileFBM(S, seed, 5, 3);
+  if (puffy) f = billowClouds(f, S, seed);
   var c = cnv(S, S), ctx = c.getContext('2d');
   var img = ctx.createImageData(S, S);
   for (var i = 0; i < S * S; i++) {
@@ -2934,6 +2935,33 @@ function makeHeightField(P) {
   };
 }
 
+/* Fair-weather cumulus are heaped, not smoke: the finer octaves are folded
+   (1 - |2n - 1|) so they crease into cauliflower lobes, and the lookup is
+   pushed about by a slow warp so the edges curl. The result is matched to the
+   plain field's mean and spread, so the sky's cover thresholds mean the same. */
+function billowClouds(f, S, seed) {
+  var wx = tileFBM(S, seed + 17, 2, 2), wy = tileFBM(S, seed + 31, 2, 2);
+  var out = new Float32Array(S * S), x, y, o, i;
+  for (y = 0; y < S; y++) for (x = 0; x < S; x++) {
+    i = y * S + x;
+    var px = x + (wx[i] - 0.5) * S * 0.07, py = y + (wy[i] - 0.5) * S * 0.07;
+    var acc = 0, amp = 1, norm = 0;
+    for (o = 0; o < 5; o++) {
+      var p = 3 * Math.pow(2, o), n = tnoise(px * p / S, py * p / S, p, seed + o * 977);
+      acc += (o < 2 ? n : 1 - Math.abs(2 * n - 1)) * amp;
+      norm += amp; amp *= 0.52;
+    }
+    out[i] = acc / norm;
+  }
+  var m0 = 0, m1 = 0, s0 = 0, s1 = 0, N = S * S;
+  for (i = 0; i < N; i++) { m0 += f[i]; m1 += out[i]; }
+  m0 /= N; m1 /= N;
+  for (i = 0; i < N; i++) { s0 += (f[i] - m0) * (f[i] - m0); s1 += (out[i] - m1) * (out[i] - m1); }
+  var k = Math.sqrt(s0 / Math.max(s1, 1e-9));
+  for (i = 0; i < N; i++) out[i] = m0 + (out[i] - m1) * k;
+  return out;
+}
+
 /* ---------- sky ---------- */
 function buildSky(scene, P, R, U) {
   var geo = new THREE.SphereGeometry(3000, 32, 20);
@@ -2959,7 +2987,8 @@ function buildSky(scene, P, R, U) {
     uOff2: { value: new THREE.Vector2() },
     uCloudTex: { value: (function () {
       var cseed = R.int(1, 99999);
-      return cached('cloud|' + cseed + '|' + Q().tex, function () { return makeCloudTexture(cseed, Q().tex); });
+      var puffy = P.weatherKey === 'clear' || P.weatherKey === 'fair' || P.weatherKey === 'breezy';
+      return cached('cloud|' + cseed + '|' + Q().tex + (puffy ? '|puffy' : ''), function () { return makeCloudTexture(cseed, Q().tex, puffy); });
     })() }
   };
   App.skyU = uni;
@@ -3029,6 +3058,11 @@ function buildSky(scene, P, R, U) {
       '    sky += vec3(0.55, 0.60, 0.72) * pow(max(md, 0.0), 90.0) * 0.35 * uNight;',
       '  }',
       '  float band = smoothstep(0.005, 0.20, d.y);',
+      /* Toward the horizon the deck is too far to resolve: instead of fading
+         it out (which left a clear band under every overcast), it turns into
+         its own average cover, hazed toward the horizon colour. */
+      '  float far = 1.0 - smoothstep(0.03, 0.22, d.y);',
+      '  float above = smoothstep(-0.03, 0.004, d.y);',
       '  vec2 p = d.xz / max(d.y, 0.055);',
       '  vec2 uv = p * uScale;',
       /* the deck: two octaves at one height */
@@ -3039,21 +3073,29 @@ function buildSky(scene, P, R, U) {
       '  vec2 uvLo = p * uScale * 1.9 + uOff2 * 2.6 + vec2(0.27, 0.71);',
       '  float nLo = texture2D(uCloudTex, uvLo).r;',
       '  float scud = smoothstep(uCover + 0.22, uCover + 0.40, nLo) * band * 0.55 * uCloudOp * smoothstep(0.02, 0.35, d.y);',
-      '  float cov = smoothstep(uCover, uCover + uSoft, n) * band * uCloudOp;',
+      '  float covM = smoothstep(uCover - 0.35, uCover + uSoft + 0.25, 0.5);',
+      '  float cov = mix(smoothstep(uCover, uCover + uSoft, n), covM, far) * above * uCloudOp;',
       '  float thick = smoothstep(uCover - 0.06, uCover + 0.34, n);',
       /* sample the cloud again a little toward the sun; where density falls
          off in that direction we are on the lit face, else in its own shadow */
       '  vec2 toSun = normalize(uSunDir.xz + vec2(1e-4)) * 0.011;',
       '  float n2 = texture2D(uCloudTex, uv * 0.55 + uOff1 + toSun).r * 0.58',
       '           + texture2D(uCloudTex, uv * 1.37 + uOff2 + toSun * 2.5).r * 0.42;',
-      '  float litFace = smoothstep(-0.03, 0.09, n - n2) * uSunVis;',
+      /* Lit faces: density falling off toward the sun, and Beer-Lambert through
+         the cloud between here and the sun, with a powder term so thin wisps
+         are not the brightest part */
+      '  float beer = exp(-max(n2 - uCover, 0.0) * 6.0);',
+      '  float powder = 1.0 - exp(-max(n - uCover, 0.0) * 8.0);',
+      '  float litFace = (smoothstep(-0.03, 0.09, n - n2) * 0.5 + beer * mix(0.55, 1.0, powder) * 0.5) * uSunVis;',
       '  vec2 uvHi = p * uScale * 0.36 + uOff1 * 0.55 + vec2(0.61, 0.13);',
       '  float nHi = texture2D(uCloudTex, uvHi).r;',
       '  float cirrus = smoothstep(uCover + 0.14, uCover + 0.36, nHi) * band * 0.5 * uCloudOp;',
       '  sky = mix(sky, mix(uCloudL, uSunCol, 0.12) * 1.02, cirrus);',
-      '  vec3 cc = mix(uCloudL, uCloudD, thick * 0.92);',
-      '  cc = mix(cc * 0.86, cc * 1.10 + uSunCol * 0.08, litFace);',
+      /* the thick middle of a cloud is its flat underside, darker */
+      '  vec3 cc = mix(uCloudL, uCloudD * 0.92, thick * 0.95);',
+      '  cc = mix(cc * 0.82, cc * 1.10 + uSunCol * 0.08, litFace);',
       '  cc += uSunCol * pow(sd, 7.0) * 0.30 * (1.0 - thick) * uSunVis;',
+      '  cc = mix(cc, mix(mix(uCloudL, uCloudD, 0.45), hor, 0.55), far);',
       '  sky = mix(sky, cc, clamp(cov, 0.0, 1.0));',
       '  sky = mix(sky, uCloudD * 0.82, scud);',
       /* A rainbow stands opposite the sun at forty-two degrees, so it only
