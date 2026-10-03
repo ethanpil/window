@@ -2713,6 +2713,7 @@ function buildWorld(seed) {
     uGroundCol: { value: new THREE.Color(0x303428) },
     uCloudShift: { value: new THREE.Vector2() },
     uWet:       { value: 0 },
+    uMirage:    { value: 0 },
     uShadowMap: { value: (function () {
       var t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
       t.needsUpdate = true; return t;
@@ -2723,7 +2724,10 @@ function buildWorld(seed) {
   App.U = U;
   /* what the ground reflects back up, roughly: the bare earth and the plants'
      colour weighted by how much they cover it */
-  App.albedo = new THREE.Color(P.grass.soil).lerp(new THREE.Color(P.grass.cb || P.grass.base)
+  /* bare sand is the colour of the sand, not of the soil under a sward: a
+     dune or a salt pan throws a bright warm light back up under things */
+  var sandy = { coast: 1, desert: 1, oasis: 1, saltflat: 1, canyon: 1 }[P.biomeKey];
+  App.albedo = new THREE.Color(sandy ? P.grass.base : P.grass.soil).lerp(new THREE.Color(sandy ? P.grass.tip : P.grass.soil), 0.4).lerp(new THREE.Color(P.grass.cb || P.grass.base)
     .lerp(new THREE.Color(P.grass.ct || P.grass.tip), 0.5), clamp((P.coverCount || 0) / 26000, 0, 1) * 0.8);
 
   buildSky(scene, P, R, U);
@@ -3669,6 +3673,7 @@ function buildTerrain(scene, P, R, U, H) {
     uPave: { value: desertK === 2 ? 1.0 : 0.0 },
     uWash: { value: P.pathKind === 'wash' ? 1.0 : 0.0 },
     uSalt: { value: TKt === 'salt' ? 1.0 : 0.0 },
+    uMirage: U.uMirage,
     uZenith: App.skyU.uZenith, uHorizon: App.skyU.uHorizon,
     uSkyCloud: App.skyU.uCloudTex, uSkyScale: App.skyU.uScale,
     uSkyCover: App.skyU.uCover, uSkySoft: App.skyU.uSoft, uSkyOff: App.skyU.uOff1,
@@ -3696,7 +3701,7 @@ function buildTerrain(scene, P, R, U, H) {
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uFloorY, uBedY[16], uBedH[16]; uniform vec3 uBedC[16];',
       'uniform vec4 uCan1, uCan2; uniform float uRiver; uniform vec3 uRiverCol;',
-      'uniform vec4 uDuneA, uDuneB, uDuneC, uDuneD; uniform vec2 uDuneR; uniform vec3 uRip; uniform float uSand, uPave, uSalt, uWash;',
+      'uniform vec4 uDuneA, uDuneB, uDuneC, uDuneD; uniform vec2 uDuneR; uniform vec3 uRip; uniform float uSand, uPave, uSalt, uWash, uMirage;',
       /* duneAt() in the script, term for term, with its gradient: (height,
          dh/dx, dh/dz, phase in wavelengths); y is the profile, 0 trough to 1 brink */
       'vec4 duneG(vec2 p, out float y){',
@@ -4162,6 +4167,17 @@ function buildTerrain(scene, P, R, U, H) {
       '    vec3 still = mix(uFogCol, uZenith, 0.45) * 0.92;',
       '    lit = mix(lit, mix(lit * 0.7, still, 0.8), level * 0.55);',
       '    lit *= 1.0 - 0.38 * bund;',
+      '  }',
+      /* the mirage: ground seen within half a degree of the horizon, past
+         four hundred metres, shows the sky just above it, broken along its
+         length (uMirage, from updateWeather) */
+      '  if (uMirage > 0.01) {',
+      /* the ray must graze the ground itself: up a slope there is none */
+      '    float dip = dot(normalize(uCamPos - vW), normalize(vN));',
+      '    float mir = uMirage * smoothstep(400.0, 900.0, dC) * smoothstep(-0.0004, 0.0012, dip) * (1.0 - smoothstep(0.004, 0.010, dip))',
+      '      * smoothstep(0.985, 0.998, vN.y) * (1.0 - smoothstep(6.0, 14.0, vW.y - uCamPos.y));',
+      '    mir *= 0.55 + 0.45 * vn(vec2(atan(vW.x - uCamPos.x, uCamPos.z - vW.z) * 160.0, 3.7));',
+      '    lit = mix(lit, mix(uFogCol, uZenith, 0.3), mir * 0.85);',
       '  }',
       '  vec3 fogC = hazeAt(uFogCol, normalize(vW - uCamPos), uSunDir, uSunCol, vFog);',
       '  gl_FragColor = vec4(mix(lit, fogC, vFog), 1.0);',
@@ -10729,9 +10745,22 @@ function updateWeather(t) {
   mixHex(S.uHorizon.value, A.hor, B.hor, k);
   desat(S.uHorizon.value, W.desat * 0.85);
   S.uHorizon.value.multiplyScalar(lerp(0.80, 1.0, lightMul));
-  /* the landscape's own air tints the horizon a little: dust warm, sea cool */
+  /* the landscape's own air tints the horizon a little: dust warm, sea cool.
+     Dry country is dusty only when the wind lifts it, or in a dust haze;
+     on a still clear day its air is the cleanest there is, and its sky the
+     deepest blue */
   var hz = cityAir ? P.cityHaze : P.biome.haze;
-  S.uHorizon.value.r *= lerp(1, hz[0], 0.6); S.uHorizon.value.g *= lerp(1, hz[1], 0.6); S.uHorizon.value.b *= lerp(1, hz[2], 0.6);
+  var dustK = ARID[P.biomeKey] && !cityAir ? ((P.weatherKey === 'breezy' || P.weatherKey === 'mist') ? 1 : 0.25) : 1;
+  S.uHorizon.value.r *= lerp(1, hz[0], 0.6 * dustK); S.uHorizon.value.g *= lerp(1, hz[1], 0.6 * dustK); S.uHorizon.value.b *= lerp(1, hz[2], 0.6 * dustK);
+  if (ARID[P.biomeKey] && (P.weatherKey === 'clear' || P.weatherKey === 'fair')) {
+    var dz = smoothstep(-2, 12, elev * 180 / Math.PI);
+    S.uZenith.value.r *= lerp(1, 0.85, dz); S.uZenith.value.g *= lerp(1, 0.92, dz); S.uZenith.value.b *= lerp(1, 1.06, dz);
+  }
+  /* Over hot flat ground on a clear day the air just above it bends the low
+     sky down: a band of sky lies on the ground at the horizon, the "water"
+     of a mirage. Still, not a shimmer. */
+  App.U.uMirage.value = ((P.biomeKey === 'desert' || P.biomeKey === 'saltflat') && (P.weatherKey === 'clear' || P.weatherKey === 'fair'))
+    ? smoothstep(22, 40, elev * 180 / Math.PI) * (P.weatherKey === 'clear' ? 1 : 0.6) : 0;
   /* the far ground fades to the sky it meets: one colour, so there is no seam */
   U.uFogCol.value.copy(S.uHorizon.value);
   /* Away from a low sun the horizon is not the sun's orange: it is a cooler
