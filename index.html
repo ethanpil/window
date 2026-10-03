@@ -4211,6 +4211,11 @@ function buildTerrain(scene, P, R, U, H) {
   });
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
+  /* Last of the solids: drawn first, every pixel of ground behind a wall,
+     a tower or a tree was shaded and then painted over (urban 65 to 44 ms,
+     penthouse 55 to 22 on an HD 4600). Water (-1), the sky (900) and the
+     ridges are in the transparent pass or later still. */
+  m.renderOrder = 1;
   scene.add(m);
   App.terrain = m;
 }
