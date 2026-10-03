@@ -4163,6 +4163,30 @@ function finishGeo(B) {
   geo.setAttribute('rib', new THREE.Float32BufferAttribute(B.rib, 1));
   geo.setIndex(B.idx);
   geo.computeVertexNormals();
+  /* A ring closes on a repeated vertex, so its seam carried two normals, one
+     from the faces either side, and the light creased down every trunk,
+     lighthouse and silo along it. Average the normals of vertices that share
+     a position where they nearly agree: that mends a seam and leaves the
+     hard edge of a box or a roof alone. */
+  var nor = geo.attributes.normal.array, src = nor.slice(), pos = B.pos, groups = {}, i, a, b;
+  for (i = 0; i < pos.length; i += 3) {
+    var key = Math.round(pos[i] * 2e4) + ',' + Math.round(pos[i + 1] * 2e4) + ',' + Math.round(pos[i + 2] * 2e4);
+    (groups[key] || (groups[key] = [])).push(i);
+  }
+  for (var k in groups) {
+    var g = groups[k];
+    if (g.length < 2) continue;
+    for (a = 0; a < g.length; a++) {
+      var ia = g[a], sx = 0, sy = 0, sz = 0;
+      for (b = 0; b < g.length; b++) {
+        var ib = g[b];
+        if (src[ia] * src[ib] + src[ia + 1] * src[ib + 1] + src[ia + 2] * src[ib + 2] < 0.5) continue;
+        sx += src[ib]; sy += src[ib + 1]; sz += src[ib + 2];
+      }
+      var l = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1;
+      nor[ia] = sx / l; nor[ia + 1] = sy / l; nor[ia + 2] = sz / l;
+    }
+  }
   return geo;
 }
 
