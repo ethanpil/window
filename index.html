@@ -521,8 +521,10 @@ var AUTUMN_PALETTES = [
   { name: 'russet floor', base: '#6b452a', tip: '#ab7d42', soil: '#523821', dry: '#c39a5b' }
 ];
 var MOOR_PALETTES = [
-  { name: 'heather', base: '#4a4235', tip: '#8a6f92', soil: '#3d362c', dry: '#7d6a56', cb: '#544a3c', ct: '#9b76a6' },
-  { name: 'ling and peat', base: '#433d31', tip: '#7c6480', soil: '#35302a', dry: '#6f6252', cb: '#4d453a', ct: '#8d6e95' }
+  /* tip is the stems and old growth; ct the bells, which only the top of
+     each bush carries (buildGrass) */
+  { name: 'heather', base: '#4a4235', tip: '#6e6450', soil: '#3d362c', dry: '#7d6a56', cb: '#544a3c', ct: '#9b76a6' },
+  { name: 'ling and peat', base: '#433d31', tip: '#655b49', soil: '#35302a', dry: '#6f6252', cb: '#4d453a', ct: '#8d6e95' }
 ];
 var TUNDRA_PALETTES = [
   { name: 'tundra moss', base: '#4d5442', tip: '#8d9068', soil: '#5a5850', dry: '#9a9578', cb: '#5c6247', ct: '#96996d' },
@@ -803,7 +805,7 @@ var ARID = { desert: 1, canyon: 1, saltflat: 1, oasis: 1, savanna: 1 };
 var SEASONS = {
   spring: { label: 'spring', hue: 0.020, sat: 0.10, light: 0.045, flowers: 1.7, snow: 0, blossom: true },
   summer: { label: 'summer', hue: -0.012, sat: 0.03, light: 0.015, flowers: 1.0, snow: 0 },
-  autumn: { label: 'autumn', hue: -0.075, sat: 0.02, light: -0.025, flowers: 0.30, snow: 0, leaves: true },
+  autumn: { label: 'autumn', hue: 0, toward: 0.115, pull: 0.45, sat: -0.04, light: -0.025, flowers: 0.30, snow: 0, leaves: true },
   winter: { label: 'winter', hue: -0.020, sat: -0.24, light: -0.030, flowers: 0.0, snow: 1 }
 };
 var SEASON_ORDER = ['spring', 'summer', 'autumn', 'winter'];
@@ -814,6 +816,17 @@ function tintHex(hex, dh, ds, dl) {
   var c = new THREE.Color(hex);
   c.offsetHSL(dh, ds, dl);
   return '#' + c.getHexString();
+}
+/* A season's tint on a plant colour, scaled by k. Autumn does not turn every
+   hue the same way (a fixed shift took green to olive but brown to maroon):
+   it pulls each part of the way toward straw. */
+function seasonHex(hex, SEA, k) {
+  if (SEA.toward == null) return tintHex(hex, SEA.hue * k, SEA.sat * k, SEA.light * k);
+  var c = new THREE.Color(hex), hsl = {};
+  c.getHSL(hsl);
+  var dh = SEA.toward - hsl.h;
+  if (dh > 0.5) dh -= 1; else if (dh < -0.5) dh += 1;
+  return tintHex(hex, dh * SEA.pull * k, SEA.sat * k, SEA.light * k);
 }
 
 var WIND_NAMES = ['northerly', 'north-easterly', 'easterly', 'south-easterly', 'southerly', 'south-westerly', 'westerly', 'north-westerly'];
@@ -1033,12 +1046,12 @@ function buildParams(seedStr, nonce) {
   var sandG = { coast: 1, desert: 1, canyon: 1, saltflat: 1 }[P.biomeKey] ? 0 : 1;
   var soilG = { coast: 1, desert: 1, canyon: 1, saltflat: 1, oasis: 1, savanna: 1 }[P.biomeKey] ? 0 : 1;
   P.grass = {
-    name: P.grass.name, base: tintHex(P.grass.base, SEA.hue * sandG, SEA.sat * sandG, SEA.light * sandG),
-    tip: tintHex(P.grass.tip, SEA.hue * sandG, SEA.sat * sandG, SEA.light * sandG),
+    name: P.grass.name, base: seasonHex(P.grass.base, SEA, sandG),
+    tip: seasonHex(P.grass.tip, SEA, sandG),
     soil: tintHex(P.grass.soil, SEA.hue * 0.4 * soilG, SEA.sat * 0.4 * soilG, SEA.light * 0.5 * soilG),
-    dry: tintHex(P.grass.dry, SEA.hue * 0.6 * soilG, SEA.sat * 0.5 * soilG, SEA.light * 0.6 * soilG),
-    cb: P.grass.cb ? tintHex(P.grass.cb, SEA.hue, SEA.sat, SEA.light) : null,
-    ct: P.grass.ct ? tintHex(P.grass.ct, SEA.hue, SEA.sat, SEA.light) : null
+    dry: seasonHex(P.grass.dry, SEA, 0.5 * soilG),
+    cb: P.grass.cb ? seasonHex(P.grass.cb, SEA, 1) : null,
+    ct: P.grass.ct ? seasonHex(P.grass.ct, SEA, 1) : null
   };
   P.terrainSeed = LR.int(1, 100000);
   P.hillAmp = LR.range(0.5, 2.6);
@@ -1054,7 +1067,7 @@ function buildParams(seedStr, nonce) {
   P.coverStyle = B.coverStyle || 'grass';
   P.coverWet = !!B.coverWet;
   P.coverMinH = B.coverMinH || 0;
-  P.coverWidth = P.coverStyle === 'reeds' ? 0.65 : (P.coverStyle === 'heather' ? 2.6 : 1);
+  P.coverWidth = P.coverStyle === 'reeds' ? 0.9 : (P.coverStyle === 'heather' ? 1.6 : 1);
   if (P.coverStyle === 'heather') P.grassLean = R.range(0.12, 0.3);
   if (P.coverStyle === 'reeds') P.grassLean = R.range(0.22, 0.5);
   P.coverRows = B.coverRows !== false;
@@ -1069,7 +1082,10 @@ function buildParams(seedStr, nonce) {
   if (B.rows || P.crop || (B.flowers === 'dense' && R.chance(0.38))) {
     P.rowSpacing = LR.range(1.5, 2.6);
     P.rowAngle = LR.range(-0.35, 0.35);
-    P.rowColour = R.pick(['#6b5d9e', '#7a68ad', '#5f5490', '#8878bd']);
+    /* drawn always (the identity stream stays in step), used only for lavender:
+       every crop and flower row had been painted lavender purple */
+    var rowLav = R.pick(['#6b5d9e', '#7a68ad', '#5f5490', '#8878bd']);
+    P.rowColour = P.biomeKey === 'lavender' ? rowLav : null;
     if (P.crop) P.rowSpacing = LR.range(P.crop.gap[0], P.crop.gap[1]);
     else if (P.biomeKey === 'lavender') P.rowSpacing = LR.range(0.72, 1.12);
   }
@@ -1092,12 +1108,12 @@ function buildParams(seedStr, nonce) {
     var fp = GRASS_PALETTES;
     var fpick = R.pick(fp);
     P.grass = {
-      name: fpick.name, base: tintHex(fpick.base, SEA.hue, SEA.sat, SEA.light),
-      tip: tintHex(fpick.tip, SEA.hue, SEA.sat, SEA.light),
+      name: fpick.name, base: seasonHex(fpick.base, SEA, 1),
+      tip: seasonHex(fpick.tip, SEA, 1),
       soil: tintHex(fpick.soil, SEA.hue * 0.4, SEA.sat * 0.4, SEA.light * 0.5),
       dry: tintHex(fpick.dry, SEA.hue * 0.6, SEA.sat * 0.5, SEA.light * 0.6),
-      cb: fpick.cb ? tintHex(fpick.cb, SEA.hue, SEA.sat, SEA.light) : null,
-      ct: fpick.ct ? tintHex(fpick.ct, SEA.hue, SEA.sat, SEA.light) : null
+      cb: fpick.cb ? seasonHex(fpick.cb, SEA, 1) : null,
+      ct: fpick.ct ? seasonHex(fpick.ct, SEA, 1) : null
     };
     if (P.cityFront === 'park') { P.coverH = [0.06, 0.14]; P.flowerCount = Math.round(P.flowerCount * 0.5); }
     if (P.cityFront === 'houses') { P.coverH = [0.10, 0.24]; P.flowerCount = Math.round(P.flowerCount * 0.7); }
@@ -1686,10 +1702,12 @@ function makeGroundTexture(P, seed, size) {
 }
 
 function makeFlowerTexture(sp, R) {
-  /* Four flowers of the species side by side, in the same 0.8 : 1.5 proportion
+  /* Four flowers of the species side by side, in the same 0.8 : 3.0 proportion
      as the quad they will be drawn on, so nothing is stretched. Each is seen
-     from a different angle: face on, three-quarter, side, and a bud. */
-  var W = 96, Hh = 180, c = cnv(W * 4, Hh), g = c.getContext('2d');
+     from a different angle: face on, three-quarter, side, and a bud. The head
+     is about a third of the card's width, on a stem as tall as the grass: a
+     head two-thirds of it on a short stalk read as a lollipop. */
+  var W = 96, Hh = 360, c = cnv(W * 4, Hh), g = c.getContext('2d');
   g.clearRect(0, 0, W * 4, Hh);
   var views = [
     { squash: 1.0,  scale: 1.0,  petals: 0,  bud: false },
@@ -1699,13 +1717,13 @@ function makeFlowerTexture(sp, R) {
   ];
   for (var v = 0; v < 4; v++) {
     var V = views[v], ox = v * W;
-    var cx = ox + W / 2, cy = Hh * 0.22, rr = W * 0.42 * V.scale;
-    g.strokeStyle = 'rgba(74,92,45,0.95)'; g.lineWidth = W * 0.045; g.lineCap = 'round';
+    var cx = ox + W / 2, cy = Hh * 0.075, rr = W * 0.21 * V.scale * (sp.kind === 'spike' ? 1.6 : 1);
+    g.strokeStyle = 'rgba(74,92,45,0.95)'; g.lineWidth = W * 0.035; g.lineCap = 'round';
     g.beginPath(); g.moveTo(cx + R.range(-3, 3), Hh);
     g.quadraticCurveTo(cx + R.range(-8, 8), Hh * 0.62, cx, cy + rr * 0.3); g.stroke();
     g.fillStyle = 'rgba(86,110,52,0.9)';
     for (var lf = 0; lf < 1 + (R.f() < 0.6 ? 1 : 0); lf++) {
-      var ly = Hh * R.range(0.55, 0.85), side = R.f() < 0.5 ? -1 : 1;
+      var ly = Hh * R.range(0.45, 0.85), side = R.f() < 0.5 ? -1 : 1;
       g.save(); g.translate(cx, ly); g.rotate(side * R.range(0.5, 1.1));
       g.beginPath(); g.ellipse(side * W * 0.08, 0, W * 0.11, W * 0.035, 0, 0, 6.283); g.fill(); g.restore();
     }
@@ -2395,6 +2413,15 @@ var GLSL_COMMON = [
   /* Ambient from a sky above and the lit ground below, by which way a surface
      faces: an underside sees the ground's bounce, a top sees the sky. */
   'vec3 hemi(vec3 n, vec3 amb){ return mix(uGroundCol, amb, n.y * 0.5 + 0.5); }',
+  /* A gust front across a field: a wave running downwind, its crest bent and
+     its strength varied across the wind, so it arrives as patches (cat's
+     paws) rather than ruled lines. k is the wavenumber along the wind, w its
+     rate, ph a phase. Grass, flowers, sprays and the far field all use it. */
+  'float gustWave(vec2 p, vec2 dir, float t, float k, float w, float ph){',
+  '  float a = dot(p, vec2(-dir.y, dir.x)), u = dot(p, dir);',
+  '  float bendA = 1.7 * sin(a * 0.043 + 0.6) + 0.9 * sin(a * 0.11 - t * 0.07);',
+  '  return sin(u * k - t * w + ph + bendA) * (0.65 + 0.35 * sin(a * 0.071 + u * 0.019 - t * 0.21));',
+  '}',
   /* Cloud shadows are the sky's own clouds: from a point on the ground, follow
      the sun up to the deck (about 1000 m) and read the cloud texture there
      with the sky's mapping, so a shadow lies under a cloud you can see. The
@@ -3344,11 +3371,23 @@ function buildTerrain(scene, P, R, U, H) {
         function () { return makeGroundTexture(P, gseed, Q().tex); });
     })() },
     uTip: { value: new THREE.Color(P.grass.tip) },
+    /* heather is brown stems with a band of bells on top: from afar it is
+       brown touched with purple, not a purple wash */
     uCoverCol: { value: new THREE.Color(P.grass.cb || P.grass.base)
-      .lerp(new THREE.Color(P.grass.ct || P.grass.tip), 0.62) },
+      .lerp(new THREE.Color(P.grass.ct || P.grass.tip), P.coverStyle === 'heather' ? 0.32 : 0.62) },
+    uWindDir: U.uWindDir, uWind: U.uWind,
+    /* flowers too small to draw past twenty metres or so still colour the
+       field: the species' colours, speckled where their patches are */
+    uFlw0: { value: new THREE.Color(P.species && P.species[0] ? P.species[0].petal : '#ffffff') },
+    uFlw1: { value: new THREE.Color(P.species && P.species[1 % P.species.length] ? P.species[1 % P.species.length].petal : '#ffffff') },
+    uFlw2: { value: new THREE.Color(P.species && P.species[2 % P.species.length] ? P.species[2 % P.species.length].petal : '#ffffff') },
+    uFlwK: { value: P.flowerCount && P.species && P.species.length ? clamp(P.flowerCount / 900, 0.35, 1) : 0 },
     /* how much of the ground the blades actually hide, and the lowest ground
        they grow on: the far field only takes the plant colour where plants are */
     uCoverK: { value: clamp((P.coverCount || 0) / 26000, 0, 1) },
+    /* a heather moor is a carpet of bushes: the drawn ones are too few to
+       hide the ground, so close in the ground takes their colour too */
+    uCoverNear: { value: P.coverStyle === 'heather' ? 0.6 : 0.0 },
     uCoverMinY: { value: P.waterY != null ? P.waterY + Math.max(P.coverMinH || -1, P.coverWet ? -0.30 : 0.25) : -1e6 },
     uCamPos: U.uCamPos,
     uRock: { value: new THREE.Color(P.rockCol) },
@@ -3408,12 +3447,13 @@ function buildTerrain(scene, P, R, U, H) {
     fragmentShader: [
       GLSL_TONE,
       'uniform sampler2D uTex; uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uSnowCol, uTip;',
-      'uniform vec3 uRock, uHigh, uCoverCol; uniform float uCoverK, uCoverMinY;',
+      'uniform vec3 uRock, uHigh, uCoverCol; uniform float uCoverK, uCoverMinY, uCoverNear;',
       'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uBeach, uSwash, uPaddy, uStepH, uRowSp, uPuddle;',
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uStrataLo, uStrataHi;',
       'uniform float uPathW, uPathX, uPathZ, uPathBend, uPathPh, uPathBend2, uPathK2, uPathPh2, uPathGauge;',
       'uniform vec2 uPathDir; uniform vec3 uPathCol; uniform vec4 uClear;',
+      'uniform vec2 uWindDir; uniform float uWind, uFlwK; uniform vec3 uFlw0, uFlw1, uFlw2;',
       /* the same edge as clearAt() in the script */
       'float clearAmt(vec3 w){',
       '  float edge = -uClear.x + uClear.y * (sin(w.x * 0.31 + 0.7) + 0.6 * sin(w.x * 0.83 + 2.1));',
@@ -3458,9 +3498,27 @@ function buildTerrain(scene, P, R, U, H) {
       '  }',
       /* hand over from blades to ground across the band where the blades are
          shrinking away, so there is no seam */
-      '  float handover = smoothstep(11.0, 34.0, length(uCamPos - vW));',
+      '  float dC = length(uCamPos - vW);',
+      '  float handover = smoothstep(11.0, 34.0, dC);',
       '  float grows = uCoverK * smoothstep(uCoverMinY - 0.2, uCoverMinY + 0.3, vW.y);',
-      '  c = mix(c, uCoverCol * (0.72 + 0.5 * c.g), handover * 0.80 * grows);',
+      '  c = mix(c, uCoverCol * (0.72 + 0.5 * c.g), max(handover * 0.62, uCoverNear) * grows);',
+      /* Past the blades the field is still alive: where a gust lays the grass
+         over, the paler undersides and tips catch the light at a glancing
+         angle, in the same patches that sweep the near blades. */
+      '  float graze = 1.0 - smoothstep(0.06, 0.45, abs(normalize(uCamPos - vW).y));',
+      '  float fieldK = grows * handover;',
+      '  float gw = gustWave(vW.xz, uWindDir, uTime, 0.061, 0.62, 2.1);',
+      '  c = mix(c, uTip * 1.05, fieldK * graze * 0.28 * (0.5 + 0.5 * gw) * clamp(0.35 + 0.6 * uWind, 0.0, 1.0));',
+      /* flowers past drawing range: a speckle of their colours in patches,
+         which blurs to a tint once a speckle is smaller than a pixel */
+      '  float fPatch = smoothstep(0.48, 0.80, vn(vW.xz * 0.045 + 7.3)) * uFlwK * grows;',
+      '  vec2 fc = floor(vW.xz * 3.0);',
+      '  float fh = h2(fc), fpick = h2(fc + 17.0);',
+      '  float kF = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 3.0);',
+      '  vec3 fcol = fpick < 0.34 ? uFlw0 : (fpick < 0.67 ? uFlw1 : uFlw2);',
+      '  vec3 favg = (uFlw0 + uFlw1 + uFlw2) / 3.0;',
+      '  float fOn = mix(0.32, step(0.68, fh), kF) * fPatch * smoothstep(14.0, 26.0, dC);',
+      '  c = mix(c, mix(favg, fcol, kF) * (0.75 + 0.25 * c.g / max(c.g, 0.05)), fOn * 0.7);',
       '  float far = smoothstep(30.0, 240.0, length(vW.xz));',
       '  c = mix(c, mix(c, uTip * 0.82, 0.35), far);',
       /* bumpiness close in. Sampled unconditionally — inside a branch the mip
@@ -3543,6 +3601,8 @@ function buildTerrain(scene, P, R, U, H) {
       '  float diff = max(dot(N2, normalize(uSunDir)), 0.0);',
       '  vec3 light = bk.y * hemi(N2, uAmbCol * 1.15) + uSunCol * diff * 1.25 * sh;',
       '  vec3 lit = c * light;',
+      /* looking into a low sun across grass, the blades glow with it */
+      '  lit += uSunCol * uTip * pow(max(dot(normalize(vW - uCamPos), normalize(uSunDir)), 0.0), 4.0) * graze * fieldK * 0.35 * sh * (1.0 - uSnow);',
       '  vec3 Vw = normalize(uCamPos - vW), Rw = reflect(-Vw, vN);',
       '  vec3 skyR = mix(horizonAt(Rw, uFogCol, uSunDir), uZenith, smoothstep(0.0, 0.6, Rw.y));',
       '  float Fw = 0.02 + 0.98 * pow(1.0 - max(dot(vN, Vw), 0.0), 5.0);',
@@ -3765,18 +3825,23 @@ function buildWater(scene, P, R, U) {
 }
 
 /* ---------- grass ---------- */
-function bladeTemplate(bands) {
-  /* bands tapering rings plus a tip; more bands means a blade that curves
-     instead of creasing */
-  var n = Math.max(2, bands || 3);
-  var pos = [], uvs = [], idx = [], i;
-  for (i = 0; i < n; i++) {
-    var t = i / n;
-    var y = Math.pow(t, 0.88);
-    var w = 0.5 * (1 - Math.pow(t, 1.55)) * (1 - t * 0.10);
+function bladeTemplate(bands, ear) {
+  /* Rings up the blade plus a tip. A blade of grass runs nearly parallel and
+     closes only near its end; the old one tapered from the root like a spike.
+     A cereal has extra rings at the top, where the ear swells (the shader
+     widens them). More bands means a blade that curves instead of creasing. */
+  var n = Math.max(2, bands || 3), ts = [], i;
+  if (ear) ts = [0, 0.32, 0.6, 0.70, 0.76, 0.88];
+  else for (i = 0; i < n; i++) ts.push(i / n);
+  var pos = [], uvs = [], idx = [];
+  for (i = 0; i < ts.length; i++) {
+    var t = ts[i];
+    var y = ear ? t : Math.pow(t, 0.88);
+    var w = 0.5 * (1 - Math.pow(t, 4));
     pos.push(-w, y, 0); uvs.push(0, y);
     pos.push(w, y, 0); uvs.push(1, y);
   }
+  n = ts.length;
   pos.push(0, 1, 0); uvs.push(0.5, 1);
   for (i = 0; i < n - 1; i++) {
     var o = i * 2;
@@ -3790,112 +3855,189 @@ function bladeTemplate(bands) {
   return g;
 }
 
+/* How each cover grows. Grass stands in tussocks: a dozen or so blades from
+   one crown, a hand or two across, sharing a height and a colour and leaning
+   out from the middle; between them, single blades. Heather and lavender are
+   low domed bushes of short stems with their flowers in a band at the top;
+   a cereal is a few tillers to a plant with an ear on each, maize a stalk of
+   broad leaves arching out. [share in tussocks, blades, spread m, dome, lean out] */
+function coverHabit(P) {
+  if (P.biomeKey === 'lavender') return { tuft: 1.0, n: [16, 26], sig: [0.15, 0.22], dome: 0.6, out: 0.7 };
+  if (P.coverStyle === 'heather') return { tuft: 0.95, n: [16, 28], sig: [0.10, 0.20], dome: 0.55, out: 0.55 };
+  if (P.coverStyle === 'reeds') return { tuft: 0.7, n: [8, 18], sig: [0.10, 0.22], dome: 0.15, out: 0.2 };
+  if (P.crop) {
+    if (P.crop.name === 'maize') return { tuft: 1.0, n: [5, 8], sig: [0.03, 0.05], dome: 0.1, out: 1.0 };
+    if (P.crop.name === 'strawberries') return { tuft: 1.0, n: [7, 12], sig: [0.06, 0.10], dome: 0.4, out: 0.8 };
+    return { tuft: 1.0, n: [3, 6], sig: [0.025, 0.045], dome: 0.05, out: 0.15 };
+  }
+  return { tuft: 0.45, n: [8, 18], sig: [0.08, 0.16], dome: 0.25, out: 0.4 };
+}
+
 function buildGrass(scene, P, R, U, H) {
   var COUNT = Math.round(P.coverCount * Q().grassMul);
   if (!P.coverCount) { App.grass = null; App.grassMax = 0; return; }   /* bare ground is a valid landscape */
-  var tpl = bladeTemplate(Q().segs);
+  /* a stream of its own: the count depends on the detail setting, and with
+     the builder's stream that shifted everything built after the grass */
+  var GR = RNG(P.base + '/build/grass' + (P.nonce ? '/' + P.nonce : ''));
+  var hab = coverHabit(P);
+  var ear = !!(P.crop && (P.crop.name === 'wheat' || P.crop.name === 'barley'));
+  var tpl = bladeTemplate(Q().segs, ear);
   var geo = new THREE.InstancedBufferGeometry();
   geo.index = tpl.index;
   geo.setAttribute('position', tpl.attributes.position);
   geo.setAttribute('uv', tpl.attributes.uv);
 
-  var iPos = new Float32Array(COUNT * 3);
-  var iAttr = new Float32Array(COUNT * 4);
-  var iAttr2 = new Float32Array(COUNT * 2);
+  /* each blade's brightness follows the ground it grows from: the terrain's
+     own colour texture, at the broad scale the terrain shows it, so blades
+     and ground share their patches */
+  var gImg = null, gW = 0, gMean = 0.3;
+  try {
+    var gc = App.terrain.material.uniforms.uTex.value.image;
+    gW = gc.width;
+    gImg = gc.getContext('2d').getImageData(0, 0, gW, gW).data;
+    var acc = 0;
+    for (var gi = 0; gi < gImg.length; gi += 4 * 61) acc += gImg[gi] * 0.3 + gImg[gi + 1] * 0.59 + gImg[gi + 2] * 0.11;
+    gMean = Math.max(acc / Math.ceil(gImg.length / (4 * 61)), 1);
+  } catch (e) { gImg = null; }
+  var groundLum = function (x, z) {
+    if (!gImg) return 1;
+    var u = x * 0.0052 + 0.31, v = z * 0.0052 + 0.31;
+    u -= Math.floor(u); v -= Math.floor(v);
+    var o = ((Math.floor((1 - v) * gW) % gW) * gW + Math.floor(u * gW) % gW) * 4;
+    return clamp((gImg[o] * 0.3 + gImg[o + 1] * 0.59 + gImg[o + 2] * 0.11) / gMean, 0.72, 1.3);
+  };
 
-  var order = [];
+  var blades = [];
   var i, n = 0;
   var clumps = [];
   for (i = 0; i < 420; i++) {
-    var ca = R.range(-1.28, 1.28), cr = 1.4 + Math.pow(R.f(), 1.7) * 30;
-    clumps.push([Math.sin(ca) * cr, -Math.cos(ca) * cr, R.range(0.6, 1.35)]);
+    var ca = GR.range(-1.28, 1.28), cr = 1.4 + Math.pow(GR.f(), 1.7) * 30;
+    clumps.push([Math.sin(ca) * cr, -Math.cos(ca) * cr, GR.range(0.6, 1.35)]);
   }
+  /* can a blade grow here? */
+  var ok = function (x, z) {
+    var dist = Math.sqrt(x * x + z * z);
+    if (dist < 1.0 || dist > (P.coverRows ? 54 : 35)) return 0;
+    if (z > -0.6) return 0;
+    if (Math.abs(Math.atan2(x, -z)) > 1.30) return 0;
+    if (P.pathKind && onPathAt(P, x, z) > GR.f() * 0.55) return 0;
+    var hm = 1;
+    /* the kept ground under the window: mown short, or nothing grows on it */
+    if (P.clearKind) {
+      var ck = clearAt(P, x, z);
+      if (P.clearKind === 1) hm *= 1 - ck * 0.8;
+      else if (GR.f() < ck * (P.clearKind === 3 ? 0.93 : 1)) return 0;
+    }
+    if (P.waterY != null) {
+      var gh = H(x, z);
+      /* reeds stand in the shallows; grass keeps its feet dry */
+      if (gh < P.waterY + (P.coverWet ? -0.30 : 0.25)) return 0;
+      if (P.coverMinH && gh < P.waterY + P.coverMinH) return 0;
+    }
+    return hm;
+  };
   var guard = 0;
   while (n < COUNT && guard < COUNT * 12) {
     guard++;
     var x, z, hMul = 1;
-    if (R.f() < 0.55) {
-      var c = clumps[Math.floor(R.f() * clumps.length)];
-      x = c[0] + R.gauss() * 1.5;
-      z = c[1] + R.gauss() * 1.5;
+    if (GR.f() < 0.55) {
+      var c = clumps[Math.floor(GR.f() * clumps.length)];
+      x = c[0] + GR.gauss() * 1.5;
+      z = c[1] + GR.gauss() * 1.5;
       hMul = c[2];
     } else {
-      var a = R.range(-1.30, 1.30);
-      var r = 1.1 + Math.pow(R.f(), P.coverRows ? 1.45 : 1.75) * (P.coverRows ? 52 : 32);
+      var a = GR.range(-1.30, 1.30);
+      var r = 1.1 + Math.pow(GR.f(), P.coverRows ? 1.45 : 1.75) * (P.coverRows ? 52 : 32);
       x = Math.sin(a) * r; z = -Math.cos(a) * r;
     }
     if (P.rowSpacing && P.coverRows) {
-      /* snap sideways onto the nearest planted row */
+      /* snap sideways onto the nearest planted row: the plant, not each blade */
       var A = P.rowAngle;
       var perp = x * Math.cos(A) + z * Math.sin(A);
-      var snap = Math.round(perp / P.rowSpacing) * P.rowSpacing + R.gauss() * 0.10;
+      var snap = Math.round(perp / P.rowSpacing) * P.rowSpacing + GR.gauss() * 0.06;
       x += (snap - perp) * Math.cos(A);
       z += (snap - perp) * Math.sin(A);
     }
-    var dist = Math.sqrt(x * x + z * z);
-    if (dist < 1.0 || dist > (P.coverRows ? 54 : 35)) continue;
-    if (P.pathKind && onPathAt(P, x, z) > R.f() * 0.55) continue;
-    /* the kept ground under the window: mown short, or nothing grows on it */
-    if (P.clearKind) {
-      var ck = clearAt(P, x, z);
-      if (P.clearKind === 1) hMul *= 1 - ck * 0.8;
-      else if (R.f() < ck * (P.clearKind === 3 ? 0.93 : 1)) continue;
-    }
     /* thin patches and the odd bare spot: a field is not a carpet */
     var thin = fbm2(x * 0.045 + 3.1, z * 0.045, P.terrainSeed + 5, 2);
-    if (thin < -0.48 && R.f() < 0.85 && !P.rowSpacing) continue;
-    if (z > -0.6) continue;
-    if (P.waterY != null) {
-      var gh = H(x, z);
-      /* reeds stand in the shallows; grass keeps its feet dry */
-      if (gh < P.waterY + (P.coverWet ? -0.30 : 0.25)) continue;
-      if (P.coverMinH && gh < P.waterY + P.coverMinH) continue;
-      /* reeds stand in beds along the water; the drier ground between is
-         grazed and only carries a few */
-      if (P.coverStyle === 'reeds' && R.f() < 0.75 * smoothstep(0.35, 0.9, gh - P.waterY)) continue;
+    if (thin < -0.48 && GR.f() < 0.85 && !P.rowSpacing) continue;
+    if (P.waterY != null && P.coverStyle === 'reeds' && GR.f() < 0.75 * smoothstep(0.35, 0.9, H(x, z) - P.waterY)) continue;
+    /* the colour of this patch of field: a broad drift between green and dry,
+       and the brightness of the ground beneath */
+    var dryF = clamp(smoothstep(-0.15, 0.65, fbm2(x * 0.03, z * 0.03, P.terrainSeed + 31, 3)) * 0.8 + GR.range(-0.12, 0.12), 0, 1);
+    var lum = groundLum(x, z) * GR.range(0.92, 1.08);
+    var tuft = GR.f() < hab.tuft;
+    var nb = tuft ? GR.int(hab.n[0], hab.n[1]) : 1;
+    var sig = GR.range(hab.sig[0], hab.sig[1]);
+    var tH = hMul * (0.78 + 0.32 * (fbm2(x * 0.05, z * 0.05, P.terrainSeed + 9, 2) * 0.5 + 0.5)) * GR.range(0.75, 1.2);
+    for (var b = 0; b < nb && n < COUNT; b++) {
+      var ox = 0, oz = 0;
+      if (tuft) { ox = GR.gauss() * sig; oz = GR.gauss() * sig; }
+      var bx = x + ox, bz = z + oz;
+      var hm = ok(bx, bz);
+      if (!hm) continue;
+      var rr = Math.sqrt(ox * ox + oz * oz) / Math.max(sig, 1e-3);
+      /* a tussock leans out from its middle and is lower at its edge */
+      var rot = tuft && rr > 0.05 ? Math.atan2(-ox, oz) + GR.range(-0.5, 0.5) : GR.range(0, 6.283);
+      var lean = P.grassLean * GR.range(0.62, 1.4) * (tuft ? (1 - hab.out) + hab.out * Math.min(rr, 2) * 0.9 : 1);
+      var dome = tuft ? Math.max(0.35, 1 - hab.dome * rr * rr * 0.45) : 1;
+      blades.push([bx, bz, tH * hm * dome * (tuft ? GR.range(0.8, 1.15) : GR.range(0.55, 1.45)), rot, dryF, lean, lum]);
+      n++;
     }
-    var ang = Math.abs(Math.atan2(x, -z));
-    if (ang > 1.30) continue;
-    order.push([x, z, hMul]);
-    n++;
   }
   /* shuffle so trimming the instance count thins evenly rather than clipping a region */
-  for (i = order.length - 1; i > 0; i--) {
-    var j = Math.floor(R.f() * (i + 1));
-    var tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+  for (i = blades.length - 1; i > 0; i--) {
+    var j = Math.floor(GR.f() * (i + 1));
+    var tmp = blades[i]; blades[i] = blades[j]; blades[j] = tmp;
   }
-  COUNT = order.length;
+  COUNT = blades.length;
+  var iPos = new Float32Array(COUNT * 3);
+  var iAttr = new Float32Array(COUNT * 4);
+  var iAttr2 = new Float32Array(COUNT * 3);
   for (i = 0; i < COUNT; i++) {
-    var o = order[i];
+    var o = blades[i];
     var px = o[0], pz = o[1];
     var d2 = Math.sqrt(px * px + pz * pz);
     iPos[i * 3] = px;
     iPos[i * 3 + 1] = H(px, pz) - 0.02;
     iPos[i * 3 + 2] = pz;
-    var hgt = P.grassHeight * o[2] * (0.55 + R.f() * 0.9) * (0.78 + 0.32 * (fbm2(px * 0.05, pz * 0.05, P.terrainSeed + 9, 2) * 0.5 + 0.5));
+    var hgt = P.grassHeight * o[2];
     hgt *= 1 + smoothstep(8, 30, d2) * 0.45;   /* fatten distant blades so the field stays dense */
     iAttr[i * 4] = hgt;
-    iAttr[i * 4 + 1] = (0.017 + R.f() * 0.014) * P.coverWidth * (1 + smoothstep(10, 30, d2) * 1.3);
-    iAttr[i * 4 + 2] = R.range(0, 6.283);
-    iAttr[i * 4 + 3] = R.f();
+    /* half a centimetre to a centimetre across, as grass is; the shader keeps
+       every blade at least a pixel wide, so the far field still fills */
+    iAttr[i * 4 + 1] = (0.007 + GR.f() * 0.005) * P.coverWidth;
+    iAttr[i * 4 + 2] = o[3];
+    iAttr[i * 4 + 3] = o[4];
     /* the flutter phase is shared over about a hand's breadth, then drifts:
        neighbours stir alike, blades a stride apart do not */
-    iAttr2[i * 2] = px * 3.1 + pz * 2.6 + R.range(-1.1, 1.1);
-    iAttr2[i * 2 + 1] = P.grassLean * R.range(0.62, 1.4);
+    iAttr2[i * 3] = px * 3.1 + pz * 2.6 + GR.range(-1.1, 1.1);
+    iAttr2[i * 3 + 1] = o[5];
+    iAttr2[i * 3 + 2] = o[6];
   }
   geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
   geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 4));
-  geo.setAttribute('iAttr2', new THREE.InstancedBufferAttribute(iAttr2, 2));
+  geo.setAttribute('iAttr2', new THREE.InstancedBufferAttribute(iAttr2, 3));
   geo.instanceCount = COUNT;
 
+  /* a band of colour at the top: lavender's spikes, heather's bells (brown
+     out of flower), a cereal's ear */
+  var lav = P.biomeKey === 'lavender', heath = P.coverStyle === 'heather';
+  var topK = lav ? 1 : (heath ? ({ summer: 1, autumn: 0.8, spring: 0.25, winter: 0.1 }[P.seasonKey] || 1) : (ear ? 1 : 0));
+  var topCol = lav ? (P.rowColour || '#7a68ad') : (heath ? (P.grass.ct || P.grass.tip) : (ear ? (P.crop.dry || P.grass.dry) : '#000000'));
+  var tipCol = lav ? (P.grass.tip) : (heath ? new THREE.Color(P.grass.cb || P.grass.base).lerp(new THREE.Color(P.grass.dry), 0.5) : (P.rowColour || P.grass.ct || P.grass.tip));
   var uni = {
     uTime: U.uTime, uWind: U.uWind, uGust: U.uGust, uWindDir: U.uWindDir,
     uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol,
     uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow, uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale,
     uSnow: U.uSnow, uSnowCol: U.uSnowCol,
     uBase: { value: new THREE.Color(P.grass.cb || P.grass.base) },
-    uTip: { value: new THREE.Color(P.rowColour || P.grass.ct || P.grass.tip) },
+    uTip: { value: new THREE.Color(tipCol) },
     uDry: { value: new THREE.Color(P.grass.dry) },
+    uTop: { value: new THREE.Color(topCol) },
+    uTopY: { value: lav ? 0.6 : (heath ? 0.7 : 0.7) },
+    uTopK: { value: topK },
+    uEar: { value: ear ? 1 : 0 },
     uFar0: { value: P.coverRows ? 26.0 : 14.0 },
     uFar1: { value: P.coverRows ? 53.0 : 32.0 }
   };
@@ -3903,30 +4045,32 @@ function buildGrass(scene, P, R, U, H) {
     uniforms: uni,
     side: THREE.DoubleSide,
     vertexShader: [
-      'attribute vec3 iPos; attribute vec4 iAttr; attribute vec2 iAttr2;',
-      'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uFar0, uFar1;',
+      'attribute vec3 iPos; attribute vec4 iAttr; attribute vec3 iAttr2;',
+      'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uFar0, uFar1, uTopY, uTopK, uEar;',
       'uniform vec2 uWindDir;',
-      'uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uBase, uTip, uDry, uSnowCol;',
+      'uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uBase, uTip, uDry, uSnowCol, uTop;',
       'varying vec3 vColor;',
       GLSL_COMMON,
       'void main(){',
       /* Per instance, not per vertex, so the whole blade shrinks together.
          A blade narrower than a pixel cannot be drawn without flickering, so
-         instead of shading it more carefully we stop drawing it and let the
-         ground carry the far field. */
+         it is held at about a pixel across, and past that the blades are let
+         go and the ground carries the far field. */
       '  float dCam = length(iPos - cameraPosition);',
       '  float far = smoothstep(uFar0, uFar1, dCam);',
       '  float yN = position.y;',
       /* under real snow the grass is gone; a light fall leaves short pale stubs */
       '  float bury = smoothstep(0.12, 0.50, uSnow);',
       '  float h = iAttr.x * (1.0 - bury * 0.94) * (1.0 - far);',
-      '  float w = iAttr.y * (1.0 - far * far);',
+      '  float earB = uEar * smoothstep(0.66, 0.72, yN) * (1.0 - smoothstep(0.93, 1.0, yN));',
+      '  float w = max(iAttr.y, dCam * 0.0015) * (1.0 + earB * 1.9) * (1.0 - far * far);',
       '  float rot = iAttr.z;',
       '  float c = cos(rot), s = sin(rot);',
       '  vec3 lp = vec3(position.x * w, yN * h, 0.0);',
       '  lp.z += iAttr2.y * 0.20 * h * yN * yN;',
-      '  float wave = sin(dot(iPos.xz, uWindDir) * 0.22 - uTime * 1.55 + iAttr2.x * 0.6);',
-      '  float wave2 = sin(dot(iPos.xz, uWindDir) * 0.061 - uTime * 0.62 + 2.1);',
+      /* gusts sweep the field as patches, cat's paws, not as ruled lines */
+      '  float wave = gustWave(iPos.xz, uWindDir, uTime, 0.22, 1.55, iAttr2.x * 0.6);',
+      '  float wave2 = gustWave(iPos.xz, uWindDir, uTime, 0.061, 0.62, 2.1);',
       /* two turbulence rhythms, on the blade's own clock */
       '  float flut = sin(uTime * 2.7 + iAttr2.x) * 0.30 + sin(uTime * 1.25 + iAttr2.x * 1.7) * 0.22;',
       '  float drive = uWind * (0.46 + 0.95 * uGust) * iAttr2.y;',
@@ -3941,8 +4085,10 @@ function buildGrass(scene, P, R, U, H) {
       '  rp.y -= bend * bend * 0.55;',
       '  vec3 wp = iPos + rp;',
       /* the lighting normal leans with the gust, not the flutter: light rolls across
-         the field in waves without any blade flickering on its own */
-      '  vec3 N = normalize(vec3(-s, 0.62, c) + vec3(uWindDir.x, 0.0, uWindDir.y) * gustBend * 1.6 * (1.0 - far));',
+         the field in waves without any blade flickering on its own. Each edge
+         tilts off to its own side, so a blade reads as folded along its rib. */
+      '  vec3 side = vec3(c, 0.0, s) * sign(position.x) * 0.45 * (1.0 - far);',
+      '  vec3 N = normalize(vec3(-s, 0.62, c) + side + vec3(uWindDir.x, 0.0, uWindDir.y) * gustBend * 1.6 * (1.0 - far));',
       '  vec3 sd = normalize(uSunDir);',
       '  float diff = max(dot(N, sd), 0.0);',
       '  float trans = pow(max(dot(-N, sd), 0.0), 2.5) * 0.42 * smoothstep(0.1, 0.8, yN) * (1.0 - far * 0.8);',
@@ -3954,11 +4100,12 @@ function buildGrass(scene, P, R, U, H) {
       '  vec2 bk = bakedRG(wp.xz);',
       '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       '  vec3 col = mix(uBase, uTip, clamp(yN * 1.05, 0.0, 1.0));',
-      '  col = mix(col, uDry, smoothstep(0.55, 1.0, iAttr.w) * 0.45);',
-      '  col *= (0.78 + 0.44 * iAttr.w) * (1.0 - 0.18 * uWet);',
+      '  col = mix(col, uDry, iAttr.w * 0.55);',
+      '  col = mix(col, uTop, smoothstep(uTopY, uTopY + 0.08, yN) * uTopK);',
+      '  col *= iAttr2.z * (1.0 - 0.18 * uWet);',
       '  vec3 lit = col * (bk.y * hemi(N, uAmbCol * 1.15) + uSunCol * (diff * 1.15 + trans + sheen) * sh) * ao;',
       /* one steady colour for the far field: no per-blade variation left to alias */
-      '  vec3 mass = mix(uBase, uTip, 0.62) * (uAmbCol * 1.15 + uSunCol * 0.70 * sh) * 0.94;',
+      '  vec3 mass = mix(mix(uBase, uTip, 0.62), uTop, uTopK * 0.3) * (uAmbCol * 1.15 + uSunCol * 0.70 * sh) * 0.94;',
       '  lit = mix(lit, mass, far);',
       /* whitened along the whole blade, so nothing dark pokes through the snow */
       '  vec3 snowL = uAmbCol * 1.15 + uSunCol * max(sd.y, 0.0) * 1.25 * sh;',
@@ -4038,7 +4185,8 @@ function buildFlowers(scene, P, R, U, H) {
       iPos[made * 3] = x;
       iPos[made * 3 + 1] = H(x, z);
       iPos[made * 3 + 2] = z;
-      var sz = R.range(sp.size[0], sp.size[1]) * (1 + smoothstep(12, 40, d) * 1.5);
+      /* no swelling with distance: big far flowers read as pom-poms */
+      var sz = R.range(sp.size[0], sp.size[1]);
       iAttr[made * 3] = sz;
       iAttr[made * 3 + 1] = x * 3.1 + z * 2.6 + R.range(-1.1, 1.1);
       iAttr[made * 3 + 2] = R.range(0.7, 1.25);
@@ -4078,8 +4226,8 @@ function buildFlowers(scene, P, R, U, H) {
         '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
         '  float lc = cos(iVar.y), ls = sin(iVar.y);',
         '  vec2 q = vec2(position.x * lc - position.y * ls, position.x * ls + position.y * lc);',
-        '  vec3 lp = right * q.x * size * 0.8 + vec3(0.0, q.y * size * 1.5, 0.0);',
-        '  float wave = sin(dot(iPos.xz, uWindDir) * 0.22 - uTime * 1.55 + iAttr.y * 0.6);',
+        '  vec3 lp = right * q.x * size * 0.8 + vec3(0.0, q.y * size * 3.0, 0.0);',
+        '  float wave = gustWave(iPos.xz, uWindDir, uTime, 0.22, 1.55, iAttr.y * 0.6);',
         '  float flut = sin(uTime * 2.3 + iAttr.y) * 0.24 + sin(uTime * 1.1 + iAttr.y * 1.6) * 0.12;',
         '  float drive = uWind * (0.46 + 0.95 * uGust) * iAttr.z;',
         '  float bf = drive * max(0.55 + 0.4 * wave + flut, 0.0) * 0.45;',
@@ -5199,7 +5347,7 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
       '  vec2 q = vec2(position.x * c - (position.y - 0.5) * s, position.x * s + (position.y - 0.5) * c);',
       '  vec3 lp = right * q.x * size + up * q.y * size;',
       /* a slow common sway from the gust wave, a quicker rustle per spray */
-      '  float gustW = sin(dot(iPos.xz, uWindDir) * 0.22 - uTime * 1.55);',
+      '  float gustW = gustWave(iPos.xz, uWindDir, uTime, 0.22, 1.55, 0.0);',
       '  float sway = gustW * 0.55 + sin(uTime * 1.9 + ph) * 0.30 + sin(uTime * 0.8 + ph * 1.4) * 0.15;',
       '  lp.xz += uWindDir * sway * uWind * (0.3 + 0.7 * uGust) * size * 0.12;',
       '  vec3 wp = iPos + vec3(0.0, size * 0.5, 0.0) + lp;',
