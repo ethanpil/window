@@ -1593,6 +1593,14 @@ var QUALITY = [
 ];
 function Q() { return QUALITY[App.qTier == null ? 1 : App.qTier]; }
 
+/* How far back the eye sits from the glass, and how wide the glass is, for a
+   screen of this shape */
+function openingFor(W, aspect) {
+  var tanV = Math.tan(VFOV * Math.PI / 360);
+  var d = (W.glassH / W.viewFill) / (2 * tanV);
+  return { d: d, glassW: clamp(2 * d * tanV * aspect * W.viewFill, 0.66, 7.6) };
+}
+
 /* The opening is cut to the shape of the screen: wide on a desktop, tall on a
    phone. Panes are added or dropped so they stay roughly square either way. */
 function sizeWindow(P, aspect) {
@@ -1604,11 +1612,8 @@ function sizeWindow(P, aspect) {
      window.innerWidth / window.innerHeight of its own. Guard it here, where
      every caller is covered. */
   if (!isFinite(aspect) || aspect <= 0) aspect = 1;
-  var tanV = Math.tan(VFOV * Math.PI / 360);
-  var tanH = tanV * aspect;
-  var W = P.win;
-  var d = (W.glassH / W.viewFill) / (2 * tanV);
-  var glassW = clamp(2 * d * tanH * W.viewFill, 0.66, 7.6);
+  var W = P.win, O = openingFor(W, aspect);
+  var d = O.d, glassW = O.glassW;
   var inset = W.frame + 0.012;
 
   var before = W.w + ':' + W.h + ':' + W.cols + ':' + W.rows + ':' + W.arch + ':' + (App.clearPanes ? 1 : 0);
@@ -5687,7 +5692,7 @@ function buildCityHouses(scene, P, U, H, C) {
   ];
   var groups = {};
   var sides = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  var nb = Math.ceil(C.start / C.pitch) + 1, lim = visibleHalfAngle(P) * 1.25;
+  var nb = Math.ceil(C.start / C.pitch) + 1, lim = Math.max(visibleHalfAngle(P) * 1.25, 0.9);
   for (var bx = -nb; bx <= nb; bx++) for (var bz = -nb; bz <= 0; bz++) {
     var gx = bx * C.pitch, gz = bz * C.pitch, w0 = C.toWorld(gx, gz), d0 = Math.sqrt(w0[0] * w0[0] + w0[1] * w0[1]);
     if (d0 < C.streetStart || d0 >= C.start || Math.abs(Math.atan2(w0[0], -w0[1])) > lim) continue;
@@ -5731,8 +5736,10 @@ function buildCity(scene, P, R, U, H) {
   /* the near neighbourhood: houses and gardens before the city proper */
   if (P.cityFront === 'houses') buildCityHouses(scene, P, U, H, C);
   /* how wide across the view the city runs: no wider than can be seen, or
-     most of it stands behind the wall */
-  var spread = Math.min(R.range(0.9, 1.25), visibleHalfAngle(P) * 1.2);
+     most of it stands behind the wall, but never under 0.9 rad a side (like
+     scatterLim, and the houses and poles), so a narrow opening's city still
+     fills a wide screen */
+  var spread = Math.min(R.range(0.9, 1.25), Math.max(visibleHalfAngle(P) * 1.2, 0.9));
   var items = [], roofs = [];
   /* the lowest ground under a footprint, or null if any of it is in water */
   var footY = function (gx, gz, hx, hz) {
@@ -7028,11 +7035,18 @@ function landmarkGeo(kind, R) {
 }
 
 /* How far off the view axis anything can be and still be seen through the
-   window. Placing by a fixed angle put half the landmarks behind the wall. */
+   window. Placing by a fixed angle put half the landmarks behind the wall.
+   Worked out for a 16:9 screen, not for the window open at the time: the
+   world is built once and kept through a resize or a phone turned on its
+   side, and builders that read the live window drew a different number of
+   random values at each size, so one seed was another place, at another
+   hour, on a wider screen. Wider screens see a little past 16:9's edge, which
+   the scatter's margin covers; narrower ones see less of the same world. */
+var BUILD_ASPECT = 16 / 9;
 function visibleHalfAngle(P) {
-  var dist = (P.win && P.win.dist) || 2.1;
-  var w = (P.win && P.win.w) || 3.0;
-  return Math.atan((w * 0.5) / dist);
+  if (!P.win || !P.win.glassH) return Math.atan(1.5 / 2.1);
+  var O = openingFor(P.win, BUILD_ASPECT);
+  return Math.atan((O.glassW * 0.5 + P.win.frame + 0.012) / O.d);
 }
 
 function buildLandmark(scene, P, R, U, H) {
@@ -7079,7 +7093,7 @@ function buildLandmark(scene, P, R, U, H) {
     return false;
   };
   var a, dist, x, z;
-  for (var att = 0; att < 14; att++) {
+  for (var att = 0; att < 40; att++) {
     a = side * R.range(lim * 0.22, lim);
     dist = R.range(near, far);
     x = Math.sin(a) * dist; z = -Math.cos(a) * dist;
@@ -9693,7 +9707,7 @@ function buildRoadPoles(scene, P, U, H) {
   var TR = RNG(P.base + '/build/poles' + (P.nonce ? '/' + P.nonce : ''));
   var sa = Math.sin(P.pathAng), ca = Math.cos(P.pathAng);
   var side = TR.chance(0.5) ? 1 : -1, gap = TR.range(42, 52), off = P.pathW + TR.range(2.2, 3.2), u0 = TR.range(0, gap);
-  var lim = visibleHalfAngle(P) * 1.3;
+  var lim = Math.max(visibleHalfAngle(P) * 1.3, 0.9);
   var vc = function (u) {
     return P.pathBend * (Math.sin(u * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase))
          + P.pathBend2 * (Math.sin(u * P.pathK2 + P.pathPhase2) - Math.sin(P.pathPhase2));
