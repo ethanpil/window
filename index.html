@@ -1640,7 +1640,9 @@ function sizeWindow(P, aspect) {
    ============================================================ */
 var TEXCACHE = {}, TEXORDER = [], TEXCAP = 14;
 function cached(key, make) {
-  if (TEXCACHE[key]) return TEXCACHE[key];
+  /* a texture in use moves to the back of the queue, so the ones worlds
+     share are not pushed out by the ones each world makes for itself */
+  if (TEXCACHE[key]) { TEXORDER.splice(TEXORDER.indexOf(key), 1); TEXORDER.push(key); return TEXCACHE[key]; }
   var t = make();
   if (!t.userData) t.userData = {};
   t.userData.cacheKey = key;
@@ -3408,6 +3410,10 @@ function buildSky(scene, P, R, U) {
     uCloudTex: { value: (function () {
       var cseed = R.int(1, 99999);
       var puffy = P.weatherKey === 'clear' || P.weatherKey === 'fair' || P.weatherKey === 'breezy';
+      /* heaped cumulus cost 60 to 230 ms of folding per world: they come
+         from eight fields that are kept, and the sky's own scale and drift
+         make each one look new */
+      if (puffy) cseed = 1 + cseed % 8;
       return cached('cloud|' + cseed + '|' + Q().tex + (puffy ? '|puffy' : ''), function () { return makeCloudTexture(cseed, Q().tex, puffy); });
     })() }
   };
