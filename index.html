@@ -1118,8 +1118,14 @@ function buildParams(seedStr, nonce) {
   if (PATHABLE[P.biomeKey] && wantPath) {
     P.pathKind = pk;
     P.pathX = pathX; P.pathBend = pathBend; P.pathPhase = pathPhase;
-    P.pathW = pk === 'tram' ? pw1 : (pk === 'wash' ? pw2 : (pk === 'track' ? pw3 : pw4));
-    P.pathGauge = (pk === 'tram' || pk === 'track') ? pgauge : 0;
+    /* The draws keep their old ranges (changing them would shift every draw
+       after) and are remapped to real sizes: a wheel rut is 0.22 to 0.35m
+       half-width on a 1.6 to 1.9m axle, with grass left standing on the
+       crown between; ruts 2 to 3m wide on a 3 to 4m gauge had run together
+       into one bare band eight metres across. Tramlines are half as wide. */
+    var rutW = 0.22 + (pw3 - 1.9) / 1.3 * 0.13;
+    P.pathW = pk === 'tram' ? pw1 * 0.5 : (pk === 'wash' ? pw2 : (pk === 'track' ? rutW : pw4));
+    P.pathGauge = (pk === 'tram' || pk === 'track') ? 1.6 + (pgauge - 2.6) / 1.6 * 0.3 : 0;
   }
 
   if (B.terrain === 'gorge') {
@@ -3090,6 +3096,12 @@ function buildTerrain(scene, P, R, U, H) {
       '  return 1.0 - smoothstep(uPathW - e, uPathW * 1.5 + e, off);',
       '}',
       'float hs(float p){ return fract(sin(p * 91.317) * 43758.545); }',
+      /* smooth value noise for bare earth: the ground texture is painted with
+         grass blades, and those showed through every path */
+      /* a hash without sin(), which loses its precision kilometres out */
+      'float h2(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
+      'float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+      '  return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + vec2(1.0)), f.x), f.y); }',
       'uniform vec3 uCamPos, uZenith, uHorizon, uCloudL, uCloudD;',
       'uniform float uSkyScale, uSkyCover, uSkySoft; uniform vec2 uSkyOff; uniform sampler2D uSkyCloud;',
       'varying vec3 vW; varying vec3 vN; varying float vFog;',
@@ -3135,7 +3147,11 @@ function buildTerrain(scene, P, R, U, H) {
       '    c = mix(c, mix(uRowSoil, uRowCol, onRow), grow * kRow * 0.72);',
       '  }',
       '  float onPath = pathAmt(vW);',
-      '  if (onPath > 0.001) c = mix(c, uPathCol * (0.86 + 0.24 * fine.r), onPath * 0.88);',
+      /* earth grit: a coarse and a fine octave, the fine one faded out once its
+         cells are smaller than a pixel so it cannot shimmer */
+      '  float kG = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 6.0);',
+      '  float dirt = vn(vW.xz * 1.3) * 0.55 + mix(0.5, vn(vW.xz * 6.0 + 17.0), kG) * 0.45;',
+      '  if (onPath > 0.001) c = mix(c, uPathCol * (0.80 + 0.36 * dirt), onPath * 0.88);',
       '  if (uStrata > 0.5) {',
       '    float u = (vW.y - uStrataLo) / max(uStrataHi - uStrataLo, 1.0);',
       '    float band = floor(u * uStrata);',
@@ -6572,6 +6588,11 @@ function onPathAt(P, x, z) {
 function plantable(P, H, x, z) {
   if (P.waterY != null && H(x, z) < P.waterY + 0.25) return false;
   if (P.pathKind && onPathAt(P, x, z) > 0.55) return false;
+  /* nothing grows up between the wheel ruts big enough to stop a tractor */
+  if (P.pathGauge > 0.01) {
+    var tcx = P.pathX + P.pathBend * (Math.sin(z * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase));
+    if (Math.abs(x - tcx) < P.pathGauge * 0.5 + P.pathW) return false;
+  }
   return true;
 }
 
