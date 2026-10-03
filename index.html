@@ -1134,6 +1134,14 @@ function buildParams(seedStr, nonce) {
      a layout result: take them all, then decide whether to use them. */
   var wantPath = LR.chance(0.45);
   var pk = PATHABLE[P.biomeKey] || 'foot';
+  /* In farmed country and by the water the way off is as often a metalled
+     lane: tarmac between verges, a dashed line down it, telegraph poles
+     along it. Whether there is one is identity, from a stream of its own,
+     so no layout draw moves; a road is there more often than a footpath. */
+  var RD = RNG(P.base + '/road');
+  var roadRoll = RD.f(), roadMore = RD.f();
+  var road = !!{ meadow: 1, farmland: 1, hayfield: 1, river: 1, lakefront: 1 }[P.biomeKey] && roadRoll < 0.5;
+  if (road) { pk = 'lane'; wantPath = wantPath || roadMore < 0.5; }
   var pathX = LR.range(-16, 16), pathBend = LR.range(-40, 40), pathPhase = LR.range(0, 6.283);
   var pw1 = LR.range(0.5, 0.9), pw2 = LR.range(5, 14), pw3 = LR.range(1.9, 3.2), pw4 = LR.range(0.6, 1.3);
   var pgauge = LR.range(2.6, 4.2);
@@ -1166,6 +1174,8 @@ function buildParams(seedStr, nonce) {
        into one bare band eight metres across. Tramlines are half as wide. */
     var rutW = 0.22 + (pw3 - 1.9) / 1.3 * 0.13;
     P.pathW = pk === 'tram' ? pw1 * 0.5 : (pk === 'wash' ? pw2 : (pk === 'track' ? rutW : pw4));
+    /* a lane is 5.6 to 6.4 m of tarmac (the foot path's draw, remapped) */
+    if (pk === 'lane') P.pathW = 2.8 + (pw4 - 0.6) / 0.7 * 0.4;
     P.pathGauge = (pk === 'tram' || pk === 'track') ? 1.6 + (pgauge - 2.6) / 1.6 * 0.3 : 0;
   }
 
@@ -3440,6 +3450,7 @@ function buildTerrain(scene, P, R, U, H) {
     uPathK2: { value: P.pathK2 || 0 },
     uPathPh2: { value: P.pathPhase2 || 0 },
     uPathGauge: { value: P.pathGauge || 0.0 },
+    uRoad: { value: P.pathKind === 'lane' ? 1.0 : 0.0 },
     uPathCol: { value: new THREE.Color(P.grass.soil) },
     /* a city's streets, drawn on its grid (see cityPlan): [cos, sin, pitch,
        block], [street, pavement, ring start, ring end] */
@@ -3481,7 +3492,7 @@ function buildTerrain(scene, P, R, U, H) {
       'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uBeach, uSwash, uPaddy, uStepH, uRowSp, uPuddle;',
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uStrataLo, uStrataHi;',
-      'uniform float uPathW, uPathX, uPathZ, uPathBend, uPathPh, uPathBend2, uPathK2, uPathPh2, uPathGauge;',
+      'uniform float uPathW, uPathX, uPathZ, uPathBend, uPathPh, uPathBend2, uPathK2, uPathPh2, uPathGauge, uRoad;',
       'uniform vec2 uPathDir; uniform vec3 uPathCol; uniform vec4 uClear;',
       'uniform vec2 uWindDir; uniform float uWind, uFlwK; uniform vec3 uFlw0, uFlw1, uFlw2;',
       'uniform float uCityOn, uNight, uCityBuilt; uniform vec4 uCity, uCity2; uniform vec3 uCityPark;',
@@ -3499,13 +3510,17 @@ function buildTerrain(scene, P, R, U, H) {
       '  return uClear.w > 0.5 ? smoothstep(edge - uClear.z, edge + uClear.z, w.z) : 0.0;',
       '}',
       /* the same frame and sum as pathOff() in the script */
-      'float pathAmt(vec3 w){',
-      '  if (uPathW < 0.01) return 0.0;',
+      /* (along it, distance from its middle) */
+      'vec2 pathUV(vec3 w){',
       '  vec2 d = w.xz - vec2(uPathX, uPathZ);',
       '  float u = d.x * uPathDir.x - d.y * uPathDir.y, v = d.x * uPathDir.y + d.y * uPathDir.x;',
       '  float vc = uPathBend * (sin(u * 0.0042 + uPathPh) - sin(uPathPh)) + uPathBend2 * (sin(u * uPathK2 + uPathPh2) - sin(uPathPh2));',
       '  float dv = uPathBend * 0.0042 * cos(u * 0.0042 + uPathPh) + uPathBend2 * uPathK2 * cos(u * uPathK2 + uPathPh2);',
-      '  float off = abs(v - vc) * inversesqrt(1.0 + dv * dv);',
+      '  return vec2(u, abs(v - vc) * inversesqrt(1.0 + dv * dv));',
+      '}',
+      'float pathAmt(vec3 w){',
+      '  if (uPathW < 0.01) return 0.0;',
+      '  float off = pathUV(w).y;',
       '  if (uPathGauge > 0.01) off = min(abs(off - uPathGauge * 0.5), abs(off + uPathGauge * 0.5));',
       '  float e = max(fwidth(w.x), fwidth(w.z)) * 0.5;',
       '  return 1.0 - smoothstep(uPathW - e, uPathW * 1.5 + e, off);',
@@ -3612,6 +3627,25 @@ function buildTerrain(scene, P, R, U, H) {
          cells are smaller than a pixel so it cannot shimmer */
       '  float kG = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 6.0);',
       '  float dirt = vn(vW.xz * 1.3) * 0.55 + mix(0.5, vn(vW.xz * 6.0 + 17.0), kG) * 0.45;',
+      /* A lane: tarmac with a broken, crumbling edge, a strip of worn verge
+         beside it, paler wheel tracks, a dashed line down the middle. Its
+         lines are box-filtered by the pixel's footprint. */
+      '  if (uRoad > 0.5) {',
+      '    vec2 pu = pathUV(vW);',
+      '    float fr = max(fwidth(vW.x), fwidth(vW.z));',
+      '    float hw = uPathW + (vn(vec2(pu.x * 0.35, 3.1)) - 0.5) * 0.35 + (vn(vec2(pu.x * 1.7, 9.2)) - 0.5) * 0.14;',
+      '    float onR = clamp((hw - pu.y) / fr + 0.5, 0.0, 1.0);',
+      '    float verge = clamp((hw + 1.0 - pu.y) / fr + 0.5, 0.0, 1.0) * (1.0 - onR);',
+      '    float kAg = 1.0 - smoothstep(0.30, 0.85, fr * 6.0);',
+      '    float ag = mix(0.5, h2(floor(vW.xz * 6.0)), kAg);',
+      '    vec3 tar = vec3(0.17, 0.17, 0.175) * (0.80 + 0.28 * ag + 0.30 * (dirt - 0.5) + 0.2 * (c2.g - cM.g));',
+      '    float lcR = abs(pu.y - 0.5 * uPathW);',
+      '    tar *= 1.0 + 0.10 * bandAA(lcR, 0.55, 1.15, fr) - 0.08 * bandAA(lcR, 0.0, 0.40, fr);',
+      '    tar = mix(tar, vec3(0.62, 0.62, 0.60) * (0.75 + 0.25 * ag), sqAA(pu.x, 9.0, 0.33, fr) * bandAA(pu.y, 0.0, 0.06, fr) * 0.85);',
+      '    c = mix(c, c * vec3(0.70, 0.68, 0.62), verge * 0.8);',
+      '    c = mix(c, tar, onR);',
+      '    onPath = 0.0;',
+      '  }',
       '  if (onPath > 0.001) c = mix(c, uPathCol * (0.80 + 0.36 * dirt), onPath * 0.88);',
       /* A city's streets, on its grid: asphalt with paler polished wheel tracks
          and oil down the lanes, a gutter, painted centre and lane lines,
@@ -8476,6 +8510,7 @@ function buildClutter(scene, P, R, U, H) {
       if (P.waterY != null && H(x, z) < P.waterY + 0.2) continue;
       /* a worn path is where nothing low grows */
       if (kind === 'tufts' && P.pathKind && onPathAt(P, x, z) > 0.3) continue;
+      if (P.pathKind === 'lane' && onPathAt(P, x, z) > 0.05) continue;   /* a road is kept clear */
       if (kind !== 'litter' && P.clearKind && P.clearKind < 3 && clearAt(P, x, z + 0.4) > 0.05) continue;
       var csz = R.range(0.22, 0.85) * (kind === 'tufts' && !CLUTTER_GRAVEL[P.biomeKey] ? 1.5 : 1);
       var crot = R.range(0, 6.283);
@@ -8893,6 +8928,99 @@ function buildProps(scene, P, R, U, H) {
                          spec.kind === 'rock' ? 0.8 : 1.0, items[si2][2] * (spec.kind === 'rock' ? 0.6 : 0.85)]);
     }
   }
+  buildRoadPoles(scene, P, U, H);
+}
+
+/* Telegraph poles down one side of a country lane, two wires slung between
+   each pair. Wires are a pixel or so wide at most distances: drawn as
+   ribbons that widen to keep at least that, and fade as they widen, so they
+   neither break up nor thicken into ropes far off. */
+function buildRoadPoles(scene, P, U, H) {
+  if (P.pathKind !== 'lane') return;
+  var TR = RNG(P.base + '/build/poles' + (P.nonce ? '/' + P.nonce : ''));
+  var sa = Math.sin(P.pathAng), ca = Math.cos(P.pathAng);
+  var side = TR.chance(0.5) ? 1 : -1, gap = TR.range(42, 52), off = P.pathW + TR.range(2.2, 3.2), u0 = TR.range(0, gap);
+  var lim = visibleHalfAngle(P) * 1.3;
+  var vc = function (u) {
+    return P.pathBend * (Math.sin(u * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase))
+         + P.pathBend2 * (Math.sin(u * P.pathK2 + P.pathPhase2) - Math.sin(P.pathPhase2));
+  };
+  var poles = [], tops = [];
+  for (var u = -1400 + u0; u < 1400; u += gap) {
+    var dv = (vc(u + 0.5) - vc(u - 0.5));
+    var tx = sa + dv * ca, tz = -ca + dv * sa, tl = Math.sqrt(tx * tx + tz * tz);
+    var nx = -tz / tl, nz = tx / tl;
+    var v = vc(u) + side * off * Math.sqrt(1 + dv * dv);
+    var x = P.pathX + u * sa + v * ca, z = P.pathZ - u * ca + v * sa;
+    var d = Math.sqrt(x * x + z * z), ok = z < -6 && d < 650 && Math.abs(Math.atan2(x, -z)) < lim;
+    var y = ok ? H(x, z) : 0;
+    if (ok && P.waterY != null && y < P.waterY + 0.5) ok = false;
+    if (!ok) { tops.push(null); continue; }
+    var sy = TR.range(0.95, 1.08);
+    poles.push([x, y - 0.4, z, 1, Math.atan2(nz, nx), sy, 1]);
+    tops.push([x, y - 0.4 + 7.55 * sy, z, nx, nz]);
+  }
+  if (!poles.length) return;
+  var B = { pos: [], nor: [], idx: [], rib: [] };
+  pushCyl(B, 0, 0, 0, 0.14, 0.11, 7.9, 6);
+  pushBox(B, 0, 7.55, 0, 0.85, 0.06, 0.07, 0);
+  pushBox(B, -0.7, 7.68, 0, 0.04, 0.08, 0.04, 0); pushBox(B, 0.7, 7.68, 0, 0.04, 0.08, 0.04, 0);
+  instanceSolid(scene, finishGeo(B), poles, solidMat(U, '#5b4b3c', { rib: 0, grain: 1, spines: 0, barkN: 10, barkPlate: 3, aoH: 0.4 }));
+  var pos = [], bb = [], pp = [], idx = [], SEG = 12;
+  for (var i = 1; i < tops.length; i++) {
+    var A = tops[i - 1], Bt = tops[i];
+    if (!A || !Bt) continue;
+    for (var w = -1; w <= 1; w += 2) {
+      var ax = A[0] + A[3] * 0.7 * w, az = A[2] + A[4] * 0.7 * w, bx = Bt[0] + Bt[3] * 0.7 * w, bz = Bt[2] + Bt[4] * 0.7 * w;
+      var base = pos.length / 3, sag = gap * TR.range(0.012, 0.018);
+      for (var k = 0; k <= SEG; k++) for (var e = -1; e <= 1; e += 2) {
+        pos.push(ax, A[1] + 0.16, az); bb.push(bx, Bt[1] + 0.16, bz); pp.push(k / SEG, e, sag);
+      }
+      for (k = 0; k < SEG; k++) { var o = base + k * 2; idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2); }
+    }
+  }
+  if (!idx.length) return;
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('aB', new THREE.Float32BufferAttribute(bb, 3));
+  geo.setAttribute('aP', new THREE.Float32BufferAttribute(pp, 3));
+  geo.setIndex(idx);
+  var mat = new THREE.ShaderMaterial({
+    uniforms: { uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol, uHazeK: U.uHazeK },
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: [
+      'attribute vec3 aB; attribute vec3 aP;',
+      'uniform float uFogDensity; uniform vec3 uFogCol, uSunDir, uSunCol;',
+      'varying float vA; varying float vFog; varying vec3 vHaze;',
+      GLSL_COMMON,
+      'void main(){',
+      '  float t = aP.x;',
+      '  vec3 p = mix(position, aB, t); p.y -= aP.z * 4.0 * t * (1.0 - t);',
+      '  vec3 tg = normalize(aB - position + vec3(0.0, -aP.z * 4.0 * (1.0 - 2.0 * t), 0.0));',
+      '  vec3 toC = cameraPosition - p; float d = length(toC);',
+      '  vec3 sd = normalize(cross(tg, toC / d));',
+      '  float w = max(0.018, d * 0.0016);',
+      '  vA = clamp(0.018 / w, 0.07, 1.0);',
+      '  p += sd * aP.y * w * 0.5;',
+      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
+      '  vFog = fogAmtH(-mv.z, uFogDensity, p.y);',
+      '  vHaze = hazeAt(uFogCol, normalize(p - cameraPosition), uSunDir, uSunCol, vFog);',
+      '  gl_Position = projectionMatrix * mv;',
+      '}'
+    ].join('\n'),
+    fragmentShader: [
+      GLSL_TONE,
+      'varying float vA; varying float vFog; varying vec3 vHaze;',
+      'void main(){',
+      '  gl_FragColor = vec4(tone(mix(vec3(0.04, 0.04, 0.045), vHaze, vFog)), vA * 0.9);',
+      '}'
+    ].join('\n')
+  });
+  var m = new THREE.Mesh(geo, mat);
+  m.frustumCulled = false;
+  m.renderOrder = 4;
+  scene.add(m);
+  App.propMeshes.push(m);
 }
 
 /* ---------- dust drifting low over the ground ----------
