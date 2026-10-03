@@ -1179,6 +1179,14 @@ function buildParams(seedStr, nonce) {
        water. Set the river above anything the floor can reach. */
     var cRiverY = LR.range(2.1, 3.4);
     if (P.hasCanyonRiver) { P.waterY = -P.canyonDepth + cRiverY; P.shoreZ = -60; }
+    /* The window used to hang over the middle of the canyon, as high above
+       its floor as the canyon is deep. It stands on the rim now, a ledge of
+       rimrock in front, with the canyon running across the view below and
+       the far wall facing it. The axis and the ledge are layout, from their
+       own stream so no other draw moves. */
+    var CY = RNG(P.base + '/canyon' + (nonce ? '/' + nonce : ''));
+    P.canyonAng = (CY.chance(0.5) ? 1 : -1) * CY.range(1.0, 1.45);
+    P.canyonLedge = CY.range(3, 10);
   }
   if (B.terrain === 'cascade') {
     /* The rock and the water are cut from the same profile, so the fall always
@@ -1251,12 +1259,22 @@ function buildParams(seedStr, nonce) {
     P.waterY = -P.cliffDrop + LR.range(0.5, 3);
     P.waterKind = 'sea';
     P.farHills = LR.range(6, 22);
+    /* A headland running out to sea on one side, so a cliff face stands in
+       view: from the clifftop itself the edge drops away out of sight and the
+       place read as a lawn by the sea. Layout, from its own stream. */
+    var CC = RNG(P.base + '/cliff' + (nonce ? '/' + nonce : ''));
+    P.headW = CC.range(40, 90);
+    P.headX = (CC.chance(0.5) ? 1 : -1) * (P.headW * 0.8 + CC.range(25, 75));
+    P.headLen = CC.range(120, 300);
   } else if (TK === 'terrace') {
     P.stepH = LR.range(0.7, 1.8);
     P.stepW = LR.range(7, 18);
     P.terraceGrade = LR.range(0.55, 1.0);
     P.terraceTilt = LR.range(-0.3, 0.3);
     P.farHills = LR.range(20, 60);
+    /* the hillside falls away from the house to a valley floor and climbs
+       again beyond it, so the treads are seen from above, stepping down */
+    P.valleyD = RNG(P.base + '/terrace' + (nonce ? '/' + nonce : '')).range(70, 160);
   } else if (TK === 'slope') {
     P.slopeGrade = LR.range(0.06, 0.17);
     P.slopeDir = LR.range(-0.7, 0.7);
@@ -1297,6 +1315,12 @@ function buildParams(seedStr, nonce) {
     P.peakH = LR.range(110, 260);
     P.snowFrac = LR.range(0.36, 0.60);
     P.rockFrac = LR.range(0.24, 0.42);
+    /* the house is in a valley: its sides climb close by on the left and
+       right, not only on the far horizon */
+    var AV = RNG(P.base + '/valley' + (nonce ? '/' + nonce : ''));
+    P.valleyW = AV.range(28, 70);
+    P.valleyX = AV.range(-0.4, 0.4) * P.valleyW;
+    P.valleyLift = AV.range(0.35, 0.7);
   } else if (TK === 'dunes') {
     P.duneAmp = LR.range(1.2, 3.4);
     P.mesaH = LR.chance(0.55) ? LR.range(25, 90) : LR.range(4, 18);
@@ -2742,9 +2766,11 @@ function makeHeightField(P) {
     /* The coastline swings in and out, so headlands run past the window and you
        see their faces in profile. A straight edge just reads as "land stops". */
     var coastAt = function (x) {
+      var hx = (x - P.headX) / P.headW;
       var c = -edge + Math.sin(x * 0.017 + cph) * amp2
         + Math.sin(x * 0.041 - cph * 0.7) * amp2 * 0.35
-        + fbm2(x * 0.008, 4.2, s + 71, 2) * amp2 * 0.5;
+        + fbm2(x * 0.008, 4.2, s + 71, 2) * amp2 * 0.5
+        - P.headLen * Math.exp(-hx * hx * hx * hx);       /* the headland, square-ended */
       /* however the coast swings, the house is never on the edge of it; from
          an upper floor the clifftop must reach out past the foot of the view,
          or the house seems to hang over the water */
@@ -2753,7 +2779,7 @@ function makeHeightField(P) {
     return function (x, z) {
       var d = Math.sqrt(x * x + z * z);
       var c = coastAt(x);
-      var lip = smoothstep(c - 9, c + 3, z);              /* 1 on the clifftop, 0 out at sea */
+      var lip = smoothstep(c - 6, c + 2, z);              /* 1 on the clifftop, 0 out at sea */
       var h = -drop2 * (1 - lip);
       h += fbm2(x * 0.02, z * 0.02, s, 3) * 1.4 * lip * smoothstep(3, 26, d);
       h += fbm2(x * 0.006, z * 0.006, s + 13, 2) * 4.0 * lip * smoothstep(2, 34, d);
@@ -2763,8 +2789,11 @@ function makeHeightField(P) {
   if (kind === 'terrace') {
     var stepH = P.stepH, stepW = P.stepW, tilt2 = P.terraceTilt;
     /* how far up the hill a point sits, in metres, with the contour wandering */
+    var vd = P.valleyD, vr = 25, v0 = Math.sqrt(vd * vd + vr * vr);
     var runRaw = function (x, z) {
-      return (-z) * P.terraceGrade + x * tilt2 + fbm2(x * 0.0045, z * 0.0045, s + 5, 2) * 11.0;
+      /* down from the house to the valley floor vd out, then up the far side */
+      var down = Math.sqrt((-z - vd) * (-z - vd) + vr * vr) - v0;
+      return down * P.terraceGrade + x * tilt2 + fbm2(x * 0.0045, z * 0.0045, s + 5, 2) * 11.0;
     };
     /* shift the whole staircase so the house sits in the middle of a tread,
        never with a riser at the sill */
@@ -2861,12 +2890,20 @@ function makeHeightField(P) {
   if (kind === 'canyon') {
     /* stepped walls dropping to a floor, cut by side canyons */
     var cw = P.canyonW, cd = P.canyonDepth, cph = P.canyonPhase, cb = P.canyonBend, steps = P.canyonSteps;
+    /* The canyon has its own frame: a runs along the axis, which heads
+       canyonAng off straight ahead, p across it. The axis is set so the
+       window stands canyonLedge back from the top of the uppermost wall. */
+    var ksa = Math.sin(P.canyonAng || 0), kca = Math.cos(P.canyonAng || 0);
+    var cxAt = function (a) { return cb * (Math.sin(a * 0.0026 + cph) - Math.sin(cph)) + Math.sin(a * 0.011 + cph * 2) * cw * 0.10; };
+    var biteAt = function (a) { return Math.pow(Math.max(0, Math.sin(a * 0.017 + cph * 1.7)), 6) * cw * 0.55; };
+    var p0 = cxAt(0) + (ksa < 0 ? -1 : 1) * (2.9 * (cw + biteAt(0)) + (P.canyonLedge || 0));
     return function (x, z) {
       var d = Math.sqrt(x * x + z * z);
-      var cx = cb * (Math.sin(z * 0.0026 + cph) - Math.sin(cph)) + Math.sin(z * 0.011 + cph * 2) * cw * 0.10;
-      var side = Math.abs(x - cx);
+      var a = x * ksa - z * kca, p = x * kca + z * ksa + p0;
+      var cx = cxAt(a);
+      var side = Math.abs(p - cx);
       /* side canyons bite into the wall at intervals */
-      var bite = Math.pow(Math.max(0, Math.sin(z * 0.017 + cph * 1.7)), 6) * cw * 0.55;
+      var bite = biteAt(a);
       var edge = cw + bite;
       var t = clamp((side - edge) / Math.max(edge * 1.9, 1), 0, 1);
       /* terraced: a staircase of benches rather than a smooth slope */
@@ -2966,6 +3003,10 @@ function makeHeightField(P) {
       h += r1 * pk * smoothstep(60, 470, d);
       var r2 = Math.pow(ridged(x * f * 0.026 + 5.3, z * f * 0.026, s + 213, 4), 1.4);
       h += r2 * pk * 1.35 * smoothstep(300, 1000, d);
+      /* the valley sides, close in either hand and running away up the view */
+      var vs = Math.abs(x - P.valleyX + fbm2(z * 0.004, 7.7, s + 5, 2) * P.valleyW * 0.6);
+      var wallUp = smoothstep(P.valleyW, P.valleyW * 3.2, vs) * (0.55 + 0.45 * ridged(x * 0.006, z * 0.006, s + 61, 3));
+      h += wallUp * pk * P.valleyLift * smoothstep(12, 90, d);
       return h;
     };
   }
@@ -3253,6 +3294,7 @@ function buildTerrain(scene, P, R, U, H) {
     /* rain soaks into sand; puddles stand on soil and paths */
     uPuddle: { value: ((P.terrainKind || P.biome.terrain) === 'beach' || ARID[P.biomeKey]) ? 0.0 : 1.0 },
     uPaddy: { value: (P.terrainKind || P.biome.terrain) === 'terrace' ? 1.0 : 0.0 },
+    uStepH: { value: P.stepH || 1.0 },
     /* the planted rows carry on past the last plant, drawn into the ground on
        the same spacing and angle, so they run to the horizon */
     uRowSp: { value: (P.rowSpacing && P.coverRows) ? P.rowSpacing : 0.0 },
@@ -3300,7 +3342,7 @@ function buildTerrain(scene, P, R, U, H) {
       GLSL_TONE,
       'uniform sampler2D uTex; uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uSnowCol, uTip;',
       'uniform vec3 uRock, uHigh, uCoverCol; uniform float uCoverK, uCoverMinY;',
-      'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uBeach, uPaddy, uRowSp, uPuddle;',
+      'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uBeach, uPaddy, uStepH, uRowSp, uPuddle;',
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uStrataLo, uStrataHi;',
       'uniform float uPathW, uPathX, uPathZ, uPathBend, uPathPh, uPathBend2, uPathK2, uPathPh2, uPathGauge;',
@@ -3437,10 +3479,22 @@ function buildTerrain(scene, P, R, U, H) {
       '  lit = mix(lit, snowLit, laid * min(1.0, want * 1.5));',
       /* flooded paddies: level treads mirror the sky, which is what makes a
          terrace read as a rice terrace rather than a stepped lawn */
+      /* Past about forty metres the mesh cannot carry the steps and they melt
+         into the slope they stand on, and the hillside read as a plain field.
+         The risers lie on contours a tread's height apart (the melted slope
+         passes through each riser half way up it), so the bunds are drawn on
+         those contours and the treads between them hold water. Band-limited:
+         where the contours crowd under a pixel the hill takes the average.
+         Close in, where the mesh draws the real steps, the drawn bunds would
+         only trace its grid, so they come in beyond it. */
       '  if (uPaddy > 0.5) {',
-      '    float level = 1.0 - smoothstep(0.02, 0.10, slope);',
+      '    float tu = vW.y / uStepH;',
+      '    float kT = 1.0 - smoothstep(0.30, 0.85, fwidth(tu));',
+      '    float bund = (1.0 - smoothstep(0.08, 0.22, abs(fract(tu) - 0.5))) * kT * smoothstep(22.0, 48.0, length(vW.xz));',
+      '    float level = max(1.0 - smoothstep(0.02, 0.10, slope), kT * smoothstep(40.0, 90.0, length(vW.xz))) * (1.0 - bund);',
       '    vec3 still = mix(uFogCol, uZenith, 0.45) * 0.92;',
       '    lit = mix(lit, mix(lit * 0.7, still, 0.8), level * 0.55);',
+      '    lit *= 1.0 - 0.38 * bund;',
       '  }',
       '  vec3 fogC = hazeAt(uFogCol, normalize(vW - uCamPos), uSunDir, uSunCol, vFog);',
       '  gl_FragColor = vec4(mix(lit, fogC, vFog), 1.0);',
