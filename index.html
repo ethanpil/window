@@ -1119,9 +1119,28 @@ function buildParams(seedStr, nonce) {
   var pathX = LR.range(-16, 16), pathBend = LR.range(-40, 40), pathPhase = LR.range(0, 6.283);
   var pw1 = LR.range(0.5, 0.9), pw2 = LR.range(5, 14), pw3 = LR.range(1.9, 3.2), pw4 = LR.range(0.6, 1.3);
   var pgauge = LR.range(2.6, 4.2);
+  /* Which way the path runs is layout, from a stream of its own, so adding
+     it moved no other draw. A path that always set off from under the window
+     straight for the vanishing point read as a diagram of perspective: this
+     one may lead away ahead, cut across the view at an angle, or pass along
+     it some way out, and it meanders on a second, shorter swing (a field
+     length or two) on top of the long one, so it bends out of sight. */
+  var PL = RNG(P.base + '/path' + (nonce ? '/' + nonce : ''));
+  var pMode = PL.weighted([['ahead', 3], ['diagonal', 4], ['across', 2]]);
+  var pSide = PL.chance(0.5) ? 1 : -1;
+  var pAng = { ahead: PL.range(0, 0.35), diagonal: PL.range(0.4, 0.85), across: PL.range(0.95, 1.3) };
+  var pZ = { ahead: PL.range(3, 16), diagonal: PL.range(10, 40), across: PL.range(16, 80) };
+  var pX = PL.range(-0.5, 0.5);
+  var pBend2 = PL.range(4, 15) * (PL.chance(0.5) ? 1 : -1), pLen2 = PL.range(140, 280), pPh2 = PL.range(0, 6.283);
   if (PATHABLE[P.biomeKey] && wantPath) {
     P.pathKind = pk;
     P.pathX = pathX; P.pathBend = pathBend; P.pathPhase = pathPhase;
+    P.pathAng = pSide * pAng[pMode];
+    P.pathZ = -pZ[pMode];
+    /* ahead, it may start off to one side; across or slanting, it passes
+       through somewhere in the middle of the view */
+    if (pMode !== 'ahead') P.pathX = pX * pZ[pMode] * 0.8;
+    P.pathBend2 = pBend2; P.pathK2 = 6.2832 / pLen2; P.pathPhase2 = pPh2;
     /* The draws keep their old ranges (changing them would shift every draw
        after) and are remapped to real sizes: a wheel rut is 0.22 to 0.35m
        half-width on a 1.6 to 1.9m axle, with grass left standing on the
@@ -3202,8 +3221,13 @@ function buildTerrain(scene, P, R, U, H) {
     /* horizontal beds of rock, each its own shade, laid through the walls */
     uPathW: { value: P.pathKind ? P.pathW : 0.0 },
     uPathX: { value: P.pathX || 0 },
+    uPathZ: { value: P.pathZ || 0 },
+    uPathDir: { value: new THREE.Vector2(Math.sin(P.pathAng || 0), Math.cos(P.pathAng || 0)) },
     uPathBend: { value: P.pathBend || 0 },
     uPathPh: { value: P.pathPhase || 0 },
+    uPathBend2: { value: P.pathBend2 || 0 },
+    uPathK2: { value: P.pathK2 || 0 },
+    uPathPh2: { value: P.pathPhase2 || 0 },
     uPathGauge: { value: P.pathGauge || 0.0 },
     uPathCol: { value: new THREE.Color(P.grass.soil) },
     uStrata: { value: P.strata || 0 },
@@ -3235,13 +3259,18 @@ function buildTerrain(scene, P, R, U, H) {
       'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uBeach, uPaddy, uRowSp, uPuddle;',
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uStrataLo, uStrataHi;',
-      'uniform float uPathW, uPathX, uPathBend, uPathPh, uPathGauge; uniform vec3 uPathCol;',
+      'uniform float uPathW, uPathX, uPathZ, uPathBend, uPathPh, uPathBend2, uPathK2, uPathPh2, uPathGauge;',
+      'uniform vec2 uPathDir; uniform vec3 uPathCol;',
+      /* the same frame and sum as pathOff() in the script */
       'float pathAmt(vec3 w){',
       '  if (uPathW < 0.01) return 0.0;',
-      '  float cx = uPathX + uPathBend * (sin(w.z * 0.0042 + uPathPh) - sin(uPathPh));',
-      '  float off = abs(w.x - cx);',
+      '  vec2 d = w.xz - vec2(uPathX, uPathZ);',
+      '  float u = d.x * uPathDir.x - d.y * uPathDir.y, v = d.x * uPathDir.y + d.y * uPathDir.x;',
+      '  float vc = uPathBend * (sin(u * 0.0042 + uPathPh) - sin(uPathPh)) + uPathBend2 * (sin(u * uPathK2 + uPathPh2) - sin(uPathPh2));',
+      '  float dv = uPathBend * 0.0042 * cos(u * 0.0042 + uPathPh) + uPathBend2 * uPathK2 * cos(u * uPathK2 + uPathPh2);',
+      '  float off = abs(v - vc) * inversesqrt(1.0 + dv * dv);',
       '  if (uPathGauge > 0.01) off = min(abs(off - uPathGauge * 0.5), abs(off + uPathGauge * 0.5));',
-      '  float e = fwidth(w.x) * 0.5;',
+      '  float e = max(fwidth(w.x), fwidth(w.z)) * 0.5;',
       '  return 1.0 - smoothstep(uPathW - e, uPathW * 1.5 + e, off);',
       '}',
       'float hs(float p){ return fract(sin(p * 91.317) * 43758.545); }',
@@ -3708,6 +3737,7 @@ function buildFlowers(scene, P, R, U, H) {
       var d = Math.sqrt(x * x + z * z);
       if (d < 1.4 || d > Math.min(P.flowerReach || 44, 36) || z > -1.0) continue;
       if (Math.abs(Math.atan2(x, -z)) > 1.15) continue;
+      if (P.pathKind && onPathAt(P, x, z) > 0.3) continue;   /* trodden flat */
       if (P.waterY != null) {
       var gh = H(x, z);
       /* reeds stand in the shallows; grass keeps its feet dry */
@@ -7064,10 +7094,23 @@ function buildClutter(scene, P, R, U, H) {
 
 /* ---------- props: trees, palms, cacti, rocks, bushes ---------- */
 /* the same curve the ground shader draws, so plants and paint agree */
+/* Distance from the path's centre line, measured square to the line. The
+   path has its own frame: it passes through (pathX, pathZ) heading pathAng
+   off straight ahead; u runs along it, v across. pathAmt in the terrain
+   shader is the same sum, term for term. */
+function pathOff(P, x, z) {
+  var sa = Math.sin(P.pathAng), ca = Math.cos(P.pathAng);
+  var dx = x - P.pathX, dz = z - P.pathZ;
+  var u = dx * sa - dz * ca, v = dx * ca + dz * sa;
+  var vc = P.pathBend * (Math.sin(u * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase))
+         + P.pathBend2 * (Math.sin(u * P.pathK2 + P.pathPhase2) - Math.sin(P.pathPhase2));
+  var dv = P.pathBend * 0.0042 * Math.cos(u * 0.0042 + P.pathPhase)
+         + P.pathBend2 * P.pathK2 * Math.cos(u * P.pathK2 + P.pathPhase2);
+  return Math.abs(v - vc) / Math.sqrt(1 + dv * dv);
+}
 function onPathAt(P, x, z) {
   if (!P.pathKind) return 0;
-  var cx = P.pathX + P.pathBend * (Math.sin(z * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase));
-  var off = Math.abs(x - cx);
+  var off = pathOff(P, x, z);
   if (P.pathGauge > 0.01) off = Math.min(Math.abs(off - P.pathGauge * 0.5), Math.abs(off + P.pathGauge * 0.5));
   return 1 - smoothstep(P.pathW, P.pathW * 1.5, off);
 }
@@ -7076,10 +7119,7 @@ function plantable(P, H, x, z) {
   if (P.waterY != null && H(x, z) < P.waterY + 0.25) return false;
   if (P.pathKind && onPathAt(P, x, z) > 0.55) return false;
   /* nothing grows up between the wheel ruts big enough to stop a tractor */
-  if (P.pathGauge > 0.01) {
-    var tcx = P.pathX + P.pathBend * (Math.sin(z * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase));
-    if (Math.abs(x - tcx) < P.pathGauge * 0.5 + P.pathW) return false;
-  }
+  if (P.pathKind && P.pathGauge > 0.01 && pathOff(P, x, z) < P.pathGauge * 0.5 + P.pathW) return false;
   return true;
 }
 
