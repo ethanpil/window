@@ -2971,13 +2971,18 @@ function makeHeightField(P) {
       var a = Math.cbrt(d / (0.972 * 2400));
       return (0.028 + 2.916 * a * a) * 2400 * 2 / 132;
     };
+    /* A dry wash: a flat floor cut into the land, the dunes levelled across
+       it, half a metre to a metre deep, on the path's own curve */
+    var wcut = P.pathKind === 'wash' ? 0.5 + (P.pathW - 5) / 9 * 0.5 : 0;
+    var washAt = function (x, z) { return wcut ? smoothstep(0.0, 0.6, onPathAt(P, x, z)) : 0; };
     if (P.erg) {
       /* the dunes fade from the mesh where its grid can no longer carry a
          slip face; the shader keeps drawing them in the light beyond */
       var dfar = clamp(DU.lam * 5, 450, 1300);
       return function (x, z) {
         var d = Math.sqrt(x * x + z * z);
-        var h = duneAt(DU, x, z) * (1 - smoothstep(dfar, dfar * 1.6, d));
+        var wa = washAt(x, z);
+        var h = duneAt(DU, x, z) * (1 - smoothstep(dfar, dfar * 1.6, d)) * (1 - 0.9 * wa) - wa * wcut;
         h += fbm2(x * 0.02, z * 0.02, s, 3) * 0.35 * smoothstep(4, 40, d);
         h += ridged(x * f * 0.03, z * f * 0.03, s + 303, 3) * Math.min(mesa, 30) * 0.8 * smoothstep(900, 1600, d);
         return h;
@@ -3005,7 +3010,7 @@ function makeHeightField(P) {
       var apron = smoothstep(0.16 - w * 3, 0.16, m);
       h += mesa * (top * 0.86 + apron * apron * 0.14) + top * fbm2(x * 0.01, z * 0.01, s + 9, 2) * mesa * 0.03;
       h += ridged(x * f * 0.03, z * f * 0.03, s + 303, 3) * mesa * 0.8 * smoothstep(900, 1600, d);
-      return h;
+      return h - washAt(x, z) * wcut;
     };
   }
   if (kind === 'cliff') {
@@ -3662,6 +3667,7 @@ function buildTerrain(scene, P, R, U, H) {
     uRip: { value: new THREE.Vector3((desertK === 1 || TKt === 'beach') ? 1 : 0, Math.cos(DU.ang != null ? DU.ang : P.windAngle), Math.sin(DU.ang != null ? DU.ang : P.windAngle)) },
     uSand: { value: (desertK === 1 || TKt === 'beach' || TKt === 'oasis') ? 1.0 : 0.0 },
     uPave: { value: desertK === 2 ? 1.0 : 0.0 },
+    uWash: { value: P.pathKind === 'wash' ? 1.0 : 0.0 },
     uSalt: { value: TKt === 'salt' ? 1.0 : 0.0 },
     uZenith: App.skyU.uZenith, uHorizon: App.skyU.uHorizon,
     uSkyCloud: App.skyU.uCloudTex, uSkyScale: App.skyU.uScale,
@@ -3690,7 +3696,7 @@ function buildTerrain(scene, P, R, U, H) {
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uFloorY, uBedY[16], uBedH[16]; uniform vec3 uBedC[16];',
       'uniform vec4 uCan1, uCan2; uniform float uRiver; uniform vec3 uRiverCol;',
-      'uniform vec4 uDuneA, uDuneB, uDuneC, uDuneD; uniform vec2 uDuneR; uniform vec3 uRip; uniform float uSand, uPave, uSalt;',
+      'uniform vec4 uDuneA, uDuneB, uDuneC, uDuneD; uniform vec2 uDuneR; uniform vec3 uRip; uniform float uSand, uPave, uSalt, uWash;',
       /* duneAt() in the script, term for term, with its gradient: (height,
          dh/dx, dh/dz, phase in wavelengths); y is the profile, 0 trough to 1 brink */
       'vec4 duneG(vec2 p, out float y){',
@@ -3895,7 +3901,10 @@ function buildTerrain(scene, P, R, U, H) {
       '    c = mix(c, tar, onR);',
       '    onPath = 0.0;',
       '  }',
-      '  if (onPath > 0.001) c = mix(c, uPathCol * (0.80 + 0.36 * dirt), onPath * 0.88);',
+      /* a dry wash is floored with sand and gravel the floods have sorted
+         and the sun bleached, paler than the ground it cuts */
+      '  vec3 pathC = mix(uPathCol * (0.80 + 0.36 * dirt), mix(vec3(0.80, 0.74, 0.64), uPathCol, 0.3) * (0.82 + 0.30 * dirt + 0.16 * grit.r * near), uWash);',
+      '  if (onPath > 0.001) c = mix(c, pathC, onPath * 0.88);',
       /* A city's streets, on its grid: asphalt with paler polished wheel tracks
          and oil down the lanes, a gutter, painted centre and lane lines,
          zebra crossings set back from each junction and a stop line, paved
@@ -9264,10 +9273,19 @@ function scatterGroups(P, H, spec, grow, lim, S) {
     var a = S.range(-lim, lim), rr = r0 + Math.pow(S.f(), 1.35) * (r1 - r0);
     return [Math.sin(a) * rr, -Math.cos(a) * rr];
   };
+  /* Along a dry wash the water that soaks in after a flood feeds a line of
+     plants on either bank: three or four times as many there as out on the
+     plain (the wash's edge, where onPathAt runs 0.15 to 0.55). */
+  var bank = function (x, z) {
+    if (P.pathKind !== 'wash') return 1;
+    var o = onPathAt(P, x, z);
+    return o > 0.15 && o < 0.55 ? 1 : 0.28;
+  };
   if (grow.space) {
     while (items.length < spec.count && guard < spec.count * 60) {
       guard++;
       var q = polar(), sz = S.range(spec.size[0], spec.size[1]);
+      if (S.f() > bank(q[0], q[1])) continue;
       if (fits(q[0], q[1], sz, grow.space * 0.5)) items.push([q[0], q[1], sz]);
     }
     return items;
@@ -9279,7 +9297,7 @@ function scatterGroups(P, H, spec, grow, lim, S) {
     var hc = H(c[0], c[1]);
     var hollow = (H(c[0] + 25, c[1]) + H(c[0] - 25, c[1]) + H(c[0], c[1] + 25) + H(c[0], c[1] - 25)) * 0.25 - hc;
     var wet = P.waterY != null ? 1 - smoothstep(1.0, 6.0, hc - P.waterY) : 0;
-    if (S.f() > 0.45 + clamp(hollow * 0.25, -0.3, 0.4) + wet * 0.5 * grow.wet) continue;
+    if (S.f() > (0.45 + clamp(hollow * 0.25, -0.3, 0.4) + wet * 0.5 * grow.wet) * (0.4 + 0.6 * bank(c[0], c[1]) * 1.6)) continue;
     var n = S.int(grow.n[0], grow.n[1]), sig = S.range(grow.sigma[0], grow.sigma[1]);
     var base = S.range(spec.size[0], spec.size[1]);
     for (var m = 0; m < n * 3 && n > 0 && items.length < spec.count; m++) {
