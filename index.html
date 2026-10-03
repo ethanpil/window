@@ -2680,6 +2680,7 @@ function buildWorld(seed) {
   App._nearH = null;
   App._boxes = [];
   App._ao = null;
+  App._bake = null;
   App._features = [];
   App._cardMat = null;
   sizeWindow(P, window.innerWidth / window.innerHeight);
@@ -6070,16 +6071,13 @@ function bakeNear(H, sunDir) {
   if (U.uNearMap.value) U.uNearMap.value.dispose();
   U.uNearMap.value = tex;
 }
-function bakeShadows(P, H, sunDir) {
-  if (App._casters && App._casters.length) bakeNear(H, sunDir);
-  var N = Q().grid >= 180 ? 448 : 320;
-  var sx = (SHADOW.x1 - SHADOW.x0) / N, sz = (SHADOW.z1 - SHADOW.z0) / N;
+function bakeStatic(P, H, N, sx, sz) {
   var hg = new Float32Array(N * N), i, j, k;
   for (j = 0; j < N; j++) for (i = 0; i < N; i++)
     hg[j * N + i] = H(SHADOW.x0 + (i + 0.5) * sx, SHADOW.z0 + (j + 0.5) * sz);
   /* A city's buildings are solid boxes, not crowns: raise each footprint to
-     its roof in a copy of the heights, and the march below shades the street
-     from them exactly as it does from a hill. */
+     its roof in a copy of the heights, and the march shades the street from
+     them exactly as it does from a hill. */
   var boxes = App._boxes || [], hc = hg, city = boxes.length > 0;
   if (city) {
     hc = new Float32Array(hg);
@@ -6094,6 +6092,27 @@ function bakeShadows(P, H, sunDir) {
       }
     }
   }
+  /* B: how deep the water stands over each texel, for the water shader's
+     colour and its fade to nothing at the shore. Square-root encoded (8 m
+     full scale) so the first few centimetres, where the edge is, keep their
+     precision. Dry ground and no water at all read 0 and 1 respectively. */
+  var wd = new Uint8Array(N * N), maxTop = -1e9;
+  for (k = 0; k < N * N; k++) {
+    wd[k] = P.waterY == null ? 255 : Math.round(Math.sqrt(clamp((P.waterY - hg[k]) / 8, 0, 1)) * 255);
+    if (hc[k] > maxTop) maxTop = hc[k];
+  }
+  return { N: N, hc: hc, city: city, wd: wd, maxTop: maxTop };
+}
+function bakeShadows(P, H, sunDir) {
+  if (App._casters && App._casters.length) bakeNear(H, sunDir);
+  var N = Q().grid >= 180 ? 448 : 320;
+  var sx = (SHADOW.x1 - SHADOW.x0) / N, sz = (SHADOW.z1 - SHADOW.z0) / N, i, j, k;
+  /* Everything here that the sun does not move (the heights, the city
+     raised on them, the water's depth and the tallest point) is worked out
+     once per world, like the AO: a rebake as the sun moves only marches. */
+  var BK = App._bake;
+  if (!BK || BK.N !== N) BK = App._bake = bakeStatic(P, H, N, sx, sz);
+  var hc = BK.hc, city = BK.city, wd = BK.wd, maxTop = BK.maxTop;
   var lit = new Float32Array(N * N);
   /* For a city, also how high the shadow reaches up each column (the walls
      read it): the highest of each occluder's top less the ray's climb to it. */
@@ -6108,6 +6127,10 @@ function bakeShadows(P, H, sunDir) {
         var px = i + 0.5, pz = j + 0.5, g0 = hc[j * N + i], ray = g0 + 0.35, open = 1, top = g0;
         for (k = 0; k < steps; k++) {
           px += dx * step / sx; pz += dz * step / sz; ray += dy * step;
+          /* above the tallest thing in the map nothing further can shade
+             this texel or raise its shadow's height: the rest of the march
+             would change nothing */
+          if (ray >= maxTop + 0.35) break;
           var ii = px | 0, jj = pz | 0;
           if (ii < 0 || jj < 0 || ii >= N || jj >= N) break;
           var hk = hc[jj * N + ii];
@@ -6166,13 +6189,6 @@ function bakeShadows(P, H, sunDir) {
   /* ambient occlusion does not move with the sun: worked out once per world */
   if (!App._ao || App._ao.length !== N * N) App._ao = bakeAO(N, hc, sx, sz, casters);
   var ao = App._ao;
-  /* B: how deep the water stands over each texel, for the water shader's
-     colour and its fade to nothing at the shore. Square-root encoded (8 m
-     full scale) so the first few centimetres, where the edge is, keep their
-     precision. Dry ground and no water at all read 0 and 1 respectively. */
-  var wd = new Uint8Array(N * N);
-  for (k = 0; k < N * N; k++)
-    wd[k] = P.waterY == null ? 255 : Math.round(Math.sqrt(clamp((P.waterY - hg[k]) / 8, 0, 1)) * 255);
   /* soften once */
   var out = new Uint8Array(N * N * 4);
   for (j = 0; j < N; j++) for (i = 0; i < N; i++) {
