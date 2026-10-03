@@ -6050,45 +6050,64 @@ function cityMesh(scene, P, R, U, items) {
    the sun onto the same map. Nothing per frame but a texture read. */
 var SHADOW = { x0: -300, x1: 300, z0: -600, z1: 30 };
 var NEAR = { x0: -32, x1: 32, z0: -66, z1: -2 };
-/* The near caster map: every capsule in App._casters ([x0, y0, z0, x1, y1,
-   z1, radius, strength], a saguaro's trunk and each limb of its arms, a
-   bush's mass) dropped along the light onto the ground. The ray from a
-   texel up toward the sun passes within the radius of the segment: both
-   are projected along the light onto the level of the caster's foot, where
-   the capsule's round section becomes an ellipse stretched down-sun. */
+/* Drop capsules ([x0, y0, z0, x1, y1, z1, radius, strength]) along the
+   light onto a map of N texels a side over rect M with ground heights hg,
+   darkening lit. The ray from a texel up toward the sun passes within the
+   radius of the segment: both are projected along the light onto the level
+   of the caster's foot, where the capsule's round section becomes an ellipse
+   stretched down-sun. wide: no narrower than this, paler by as much (a
+   coarse map would otherwise lose a thin shadow between its texel centres);
+   wt(x, z), if given: how much of the shadow this map carries there. */
+function dropCapsules(lit, hg, N, M, sunDir, caps, wide, wt) {
+  var sx = (M.x1 - M.x0) / N, sz = (M.z1 - M.z0) / N, b = wide ? 0 : 1, i, j, k;
+  var dx = sunDir.x, dy = sunDir.y, dz = sunDir.z, hl = Math.sqrt(dx * dx + dz * dz) || 1;
+  if (dy <= 0.04 || !caps.length) return;
+  var ux = dx / hl, uz = dz / hl, sinE = dy;
+  for (k = 0; k < caps.length; k++) {
+    var c = caps[k], yb = Math.min(c[1], c[4]), r = Math.max(c[6], wide), str = c[7] * c[6] / r;
+    var low = c[1] <= c[4] ? 0 : 1;
+    /* along the light down to the foot's level: x' = x - d.x (y - yb) / d.y */
+    var ax = c[0] - dx * (c[1] - yb) / dy, az = c[2] - dz * (c[1] - yb) / dy;
+    var bx = c[3] - dx * (c[4] - yb) / dy, bz = c[5] - dz * (c[4] - yb) / dy;
+    var pad = r / sinE + 0.5;
+    var i0 = Math.max(b, Math.floor((Math.min(ax, bx) - pad - M.x0) / sx)), i1 = Math.min(N - 1 - b, Math.floor((Math.max(ax, bx) + pad - M.x0) / sx));
+    var j0 = Math.max(b, Math.floor((Math.min(az, bz) - pad - M.z0) / sz)), j1 = Math.min(N - 1 - b, Math.floor((Math.max(az, bz) + pad - M.z0) / sz));
+    if (i0 > i1 || j0 > j1) continue;
+    var lx = bx - ax, lz = bz - az, ll = lx * lx + lz * lz;
+    for (j = j0; j <= j1; j++) for (i = i0; i <= i1; i++) {
+      var idx = j * N + i, gy = hg[idx], tx = M.x0 + (i + 0.5) * sx, tz = M.z0 + (j + 0.5) * sz;
+      /* the texel, slid along the light to the foot's level */
+      var wx = tx + dx * (yb - gy) / dy, wz = tz + dz * (yb - gy) / dy;
+      var t = ll > 1e-8 ? clamp(((wx - ax) * lx + (wz - az) * lz) / ll, 0, 1) : low;
+      var qx = wx - (ax + lx * t), qz = wz - (az + lz * t);
+      /* A trunk does not shade its own sunlit side. The map is read at a
+         surface's ground position, so the round cap of the shadow at the
+         foot, up-sun of it, and the foot's own section (never seen) are the
+         trunk itself: leave them lit, or the filtering darkens its face. */
+      if (yb - gy < r + 0.5) {
+        var fx = wx - (low ? bx : ax), fz = wz - (low ? bz : az);
+        if ((t === low && qx * ux + qz * uz > 0) || fx * fx + fz * fz < c[6] * c[6]) continue;
+      }
+      var du = (qx * ux + qz * uz) * sinE, dv = -qx * uz + qz * ux;
+      var dd = Math.sqrt(du * du + dv * dv);
+      if (dd < r * 1.15) {
+        var w = wt ? wt(tx, tz) : 1;
+        if (w > 0) lit[idx] = Math.min(lit[idx], 1 - str * w * smoothstep(r * 1.15, r * 0.75, dd));
+      }
+    }
+  }
+}
+/* The near caster map: every capsule in App._casters (a saguaro's trunk and
+   each limb of its arms, a bush's mass) dropped onto the ground. */
 function bakeNear(H, sunDir) {
   var N = 256, sx = (NEAR.x1 - NEAR.x0) / N, sz = (NEAR.z1 - NEAR.z0) / N, i, j, k;
   if (!App._nearH) {
     App._nearH = new Float32Array(N * N);
     for (j = 0; j < N; j++) for (i = 0; i < N; i++) App._nearH[j * N + i] = H(NEAR.x0 + (i + 0.5) * sx, NEAR.z0 + (j + 0.5) * sz);
   }
-  var hg = App._nearH, lit = new Float32Array(N * N), caps = App._casters || [];
+  var lit = new Float32Array(N * N);
   for (k = 0; k < N * N; k++) lit[k] = 1;
-  var dx = sunDir.x, dy = sunDir.y, dz = sunDir.z, hl = Math.sqrt(dx * dx + dz * dz) || 1;
-  if (dy > 0.04 && caps.length) {
-    var ux = dx / hl, uz = dz / hl, sinE = dy;
-    for (k = 0; k < caps.length; k++) {
-      var c = caps[k], yb = Math.min(c[1], c[4]), r = c[6];
-      /* along the light down to the foot's level: x' = x - d.x (y - yb) / d.y */
-      var ax = c[0] - dx * (c[1] - yb) / dy, az = c[2] - dz * (c[1] - yb) / dy;
-      var bx = c[3] - dx * (c[4] - yb) / dy, bz = c[5] - dz * (c[4] - yb) / dy;
-      var pad = r / sinE + 0.5;
-      var i0 = Math.max(1, Math.floor((Math.min(ax, bx) - pad - NEAR.x0) / sx)), i1 = Math.min(N - 2, Math.floor((Math.max(ax, bx) + pad - NEAR.x0) / sx));
-      var j0 = Math.max(1, Math.floor((Math.min(az, bz) - pad - NEAR.z0) / sz)), j1 = Math.min(N - 2, Math.floor((Math.max(az, bz) + pad - NEAR.z0) / sz));
-      if (i0 > i1 || j0 > j1) continue;
-      var lx = bx - ax, lz = bz - az, ll = lx * lx + lz * lz;
-      for (j = j0; j <= j1; j++) for (i = i0; i <= i1; i++) {
-        var idx = j * N + i, gy = hg[idx];
-        /* the texel, slid along the light to the foot's level */
-        var wx = NEAR.x0 + (i + 0.5) * sx + dx * (yb - gy) / dy, wz = NEAR.z0 + (j + 0.5) * sz + dz * (yb - gy) / dy;
-        var t = ll > 1e-8 ? clamp(((wx - ax) * lx + (wz - az) * lz) / ll, 0, 1) : 0;
-        var qx = wx - (ax + lx * t), qz = wz - (az + lz * t);
-        var du = (qx * ux + qz * uz) * sinE, dv = -qx * uz + qz * ux;
-        var dd = Math.sqrt(du * du + dv * dv);
-        if (dd < r * 1.15) lit[idx] = Math.min(lit[idx], 1 - c[7] * smoothstep(r * 1.15, r * 0.75, dd));
-      }
-    }
-  }
+  dropCapsules(lit, App._nearH, N, NEAR, sunDir, App._casters || [], 0, null);
   var out = new Uint8Array(N * N * 4);
   for (k = 0; k < N * N; k++) { var v = Math.round(lit[k] * 255); out[k * 4] = v; out[k * 4 + 1] = v; out[k * 4 + 2] = v; out[k * 4 + 3] = 255; }
   var tex = new THREE.DataTexture(out, N, N, THREE.RGBAFormat);
