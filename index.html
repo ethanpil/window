@@ -6175,7 +6175,7 @@ var LANDMARKS = {
   silo:       { biomes: ['farmland', 'orchard'], scale: [9, 14], body: '#b9b3a4', trim: '#8a857a' },
   cabin:      { biomes: ['alpine', 'lakefront', 'river', 'autumn', 'tundra', 'marsh', 'oasis'], scale: [5, 8], body: '#6b543c', trim: '#4a3a2a', smoke: [-0.24, 0.82] },
   pagoda:     { biomes: ['terraces'], scale: [8, 13], body: '#7d4a3a', trim: '#3f3630' },
-  watertank:  { biomes: ['desert', 'saltflat', 'savanna', 'urban', 'farmland', 'hayfield'], scale: [8, 12], body: '#9aa0a2', trim: '#6f7476' },
+  watertank:  { biomes: ['desert', 'saltflat', 'savanna', 'farmland', 'hayfield'], scale: [8, 12], body: '#9aa0a2', trim: '#6f7476' },
   jetty:      { biomes: ['lakefront', 'coast', 'marsh', 'river'], scale: [6, 9], body: '#6a5a45', trim: '#4e4235' }
 };
 /* What each landmark is built of, for solidMat's facade grain (metres). */
@@ -6363,6 +6363,10 @@ function buildLandmark(scene, P, R, U, H) {
   var IR = RNG(P.base + '/landmark');
   var present = IR.f() <= 0.72, kind = opts.length ? IR.pick(opts) : null;
   var L = kind ? LANDMARKS[kind] : null, sz = L ? IR.range(L.scale[0], L.scale[1]) : 0;
+  /* a works chimney among towers is a power station's: 45 to 80 m, or the
+     city dwarfs it */
+  var bigStack = kind === 'smokestack' && P.biomeKey === 'urban';
+  if (bigStack) sz = 45 + (sz - 16) / 10 * 35;
   if (!opts.length || !present) { App.landmark = null; return; }
   /* off to one side but inside the glass: a landmark you cannot see is no
      landmark at all. The bare view has no frame, so it sees a little wider. */
@@ -6375,14 +6379,21 @@ function buildLandmark(scene, P, R, U, H) {
      not find. Thick weather leaves no room for one at all. */
   var byFog = 1.02 / Math.max(P.weather.fogD, 0.0001);
   if (byFog < 150) { App.landmark = null; return; }
-  var far = Math.min(560, byFog, (L.scale[0] + L.scale[1]) * 0.5 / 0.045);
+  var far = Math.min(560, byFog, (bigStack ? 62 : (L.scale[0] + L.scale[1]) * 0.5) / 0.045);
   var near = Math.min(190, far * 0.78);
   /* Only a jetty belongs in the water. Nothing else was checked, so a cabin
      on a lakefront could be set down on the lake bed and left standing in it.
      Look for dry ground, trying either side of the view, and rather than put
      a building under water, have none. */
   var wet = function (px, pz) {
-    return P.waterY != null && kind !== 'jetty' && H(px, pz) < P.waterY + 0.6;
+    if (P.waterY != null && kind !== 'jetty' && H(px, pz) < P.waterY + 0.6) return true;
+    /* nor inside a building: keep clear of every city footprint */
+    var bxs = App._boxes || [], r = sz * 0.35;
+    for (var bi = 0; bi < bxs.length; bi++) {
+      var b = bxs[bi], ox = px - b[0], oz = pz - b[1], c = Math.cos(b[4]), s = Math.sin(b[4]);
+      if (Math.abs(ox * c + oz * s) < b[2] + r && Math.abs(-ox * s + oz * c) < b[3] + r) return true;
+    }
+    return false;
   };
   var a, dist, x, z;
   for (var att = 0; att < 14; att++) {
