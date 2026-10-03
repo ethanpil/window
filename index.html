@@ -1787,15 +1787,16 @@ function drawBranches(g, S, x0, y0, len, ang, width, depth, R, col, tips) {
 }
 function drawCrown(g, S, kind, P, R, cx, cy, rx, ry, base, lite, opts) {
   var dark = base.clone().multiplyScalar(0.55);
-  var sunRight = Math.sin(P.sunAz) > 0;
   var sprays = [];
   var n = opts.sprays || 60;
   /* every branch end gets its own foliage, so no limb is left bare */
   var tips = opts.tips || [];
   for (var ti = 0; ti < tips.length; ti++) {
     var tp = tips[ti];
-    var side0 = (tp[0] - cx) / Math.max(rx, 1) * (sunRight ? 1 : -1);
-    var lit0 = 0.42 + 0.32 * (1 - (tp[1] - (cy - ry)) / (2 * ry)) + 0.24 * side0;
+    /* lighter toward the outside of the crown, where leaves see the sky;
+       which side the sun is on is the shader's business */
+    var side0 = Math.abs(tp[0] - cx) / Math.max(rx, 1);
+    var lit0 = 0.42 + 0.32 * (1 - (tp[1] - (cy - ry)) / (2 * ry)) + 0.12 * side0;
     sprays.push([tp[0], tp[1], lit0 + R.range(-0.1, 0.1), 1]);
     if (R.f() < 0.75) sprays.push([tp[0] + R.range(-1, 1) * S * 0.035, tp[1] + R.range(-1, 1) * S * 0.035, lit0 + R.range(-0.15, 0.1), 1]);
   }
@@ -1803,8 +1804,7 @@ function drawCrown(g, S, kind, P, R, cx, cy, rx, ry, base, lite, opts) {
     var a = R.f() * 6.283, d = Math.pow(R.f(), 0.55);
     var px = cx + Math.cos(a) * d * rx, py = cy + Math.sin(a) * d * ry;
     if (opts.flatTop && py < cy - ry * 0.15) py = cy - ry * 0.15 + (py - cy + ry * 0.15) * 0.25;
-    var side = (px - cx) / rx * (sunRight ? 1 : -1);
-    var lit = 0.35 + 0.35 * (1 - (py - (cy - ry)) / (2 * ry)) + 0.25 * side + 0.15 * d;
+    var lit = 0.35 + 0.35 * (1 - (py - (cy - ry)) / (2 * ry)) + 0.20 * d;
     sprays.push([px, py, lit + R.range(-0.12, 0.12), d]);
   }
   sprays.sort(function (p, q) { return p[2] - q[2]; });
@@ -1816,9 +1816,8 @@ function drawCrown(g, S, kind, P, R, cx, cy, rx, ry, base, lite, opts) {
   }
 }
 
-function makePropTexture(kind, P, R, opts) {
-  /* 256 square: power of two, so WebGL keeps the proportions we draw */
-  var S = 256, c = cnv(S, S), g = c.getContext('2d');
+/* One sprite of a kind, drawn into an S square at the context's origin. */
+function drawPropSprite(g, S, kind, P, R, opts) {
   var rgb = function (col) {
     return 'rgb(' + Math.round(col.r * 255) + ',' + Math.round(col.g * 255) + ',' + Math.round(col.b * 255) + ')';
   };
@@ -1945,13 +1944,13 @@ function makePropTexture(kind, P, R, opts) {
     g.beginPath(); g.moveTo(S / 2, S); g.lineTo(S / 2, S * 0.10); g.stroke();
     var pdark = new THREE.Color(R.pick(['#1b3324', '#203a2a', '#182f22'])).multiplyScalar(P.treeTint);
     var plite = pdark.clone().lerp(new THREE.Color('#7fa066'), 0.5);
-    var tiers = 10 + R.int(0, 4), sunR = Math.sin(P.sunAz) > 0;
+    var tiers = 10 + R.int(0, 4);
     for (var ti = 0; ti < tiers; ti++) {
       var f2 = ti / (tiers - 1);
       var yb = S * (0.86 - f2 * 0.74);
       var span = S * (0.30 - f2 * 0.24) * R.range(0.85, 1.15);
       for (var side = -1; side <= 1; side += 2) {
-        var lit2 = 0.45 + (side === (sunR ? 1 : -1) ? 0.35 : 0) + f2 * 0.2;
+        var lit2 = 0.62 + f2 * 0.2;
         var nn = 10 + Math.floor(span / S * 40);
         for (var q = 0; q < nn; q++) {
           var t = q / nn, bx = S / 2 + side * span * t, by = yb + t * t * span * 0.35;
@@ -2133,22 +2132,23 @@ function makePropTexture(kind, P, R, opts) {
     g.fillRect(S * (0.5 - tw / 2), S * (kind === 'pine' ? 0.80 : 0.64), S * tw, S);
     g.globalCompositeOperation = 'source-over';
   }
-  /* a light side and a shade side, on the side the sun actually is,
-     and a darker underside: the cheapest possible sense of volume */
-  if (kind !== 'rock') {
-    var fromRight = Math.sin(P.sunAz) > 0;
-    g.globalCompositeOperation = 'source-atop';
-    var lg2 = g.createLinearGradient(fromRight ? S : 0, 0, fromRight ? 0 : S, 0);
-    lg2.addColorStop(0, 'rgba(255,245,220,0.20)');
-    lg2.addColorStop(0.5, 'rgba(0,0,0,0.0)');
-    lg2.addColorStop(1, 'rgba(0,0,0,0.30)');
-    g.fillStyle = lg2; g.fillRect(0, 0, S, S);
-    var vg2 = g.createLinearGradient(0, 0, 0, S);
-    vg2.addColorStop(0, 'rgba(255,255,255,0.06)');
-    vg2.addColorStop(0.55, 'rgba(0,0,0,0.0)');
-    vg2.addColorStop(1, 'rgba(0,0,0,0.22)');
-    g.fillStyle = vg2; g.fillRect(0, 0, S, S);
-    g.globalCompositeOperation = 'source-over';
+}
+
+/* Four of a kind on a 2x2 atlas, 256 square each (a power of two, so WebGL
+   keeps the proportions drawn), and each instance takes one of them, perhaps
+   mirrored: a wood is no longer one tree stamped out. The first is drawn from
+   the builder's stream as it always was; the others from streams of their
+   own, so nothing else in the world moves. Light is not painted in: the sun
+   moves, and goes down, and the shader lights the crown (spriteLight). */
+function makePropTexture(kind, P, R, opts) {
+  var S = 256, c = cnv(S * 2, S * 2), g = c.getContext('2d');
+  for (var v = 0; v < 4; v++) {
+    g.save();
+    g.translate((v & 1) * S, (v >> 1) * S);
+    g.beginPath(); g.rect(0, 0, S, S); g.clip();
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    drawPropSprite(g, S, kind, P, v ? RNG(P.base + '/sprite/' + kind + '/' + v) : R, opts);
+    g.restore();
   }
   return tex(c, false);
 }
@@ -2159,6 +2159,49 @@ function makePropTexture(kind, P, R, opts) {
    a little narrower than drawn, and an acacia's crown spreads wider. */
 var SPRITE_ASPECT = { pine: 0.72, acacia: 1.4, creosote: 0.85, cactus: 0.62 };
 function spriteAspect(kind) { return SPRITE_ASPECT[kind] || 1.0; }
+/* Where the bulk of each kind sits on its card, as an ellipse in card
+   coordinates (x across, y up, centre and radii), for the shader to light
+   it as a solid: a crown rounds away from the sun, darkens underneath and
+   glows at its ragged edge when the sun is behind it. */
+var SPRITE_CROWN = {
+  broadleaf: [0.5, 0.62, 0.38, 0.32], olive: [0.5, 0.60, 0.36, 0.30], blossom: [0.5, 0.60, 0.36, 0.30],
+  pine: [0.5, 0.50, 0.27, 0.42], acacia: [0.5, 0.58, 0.46, 0.22], palm: [0.5, 0.60, 0.34, 0.24],
+  shrub: [0.5, 0.20, 0.32, 0.24], hedge: [0.5, 0.27, 0.46, 0.30], vine: [0.5, 0.24, 0.32, 0.22],
+  creosote: [0.5, 0.18, 0.40, 0.32], brittlebush: [0.5, 0.13, 0.38, 0.30], deadbush: [0.5, 0.10, 0.30, 0.22],
+  cactus: [0.5, 0.5, 0.15, 4.0], rock: [0.5, 0.18, 0.44, 0.40]
+};
+function spriteCrown(kind) { var c = SPRITE_CROWN[kind] || SPRITE_CROWN.broadleaf; return new THREE.Vector4(c[0], c[1], c[2], c[3]); }
+/* Vertex side: which of the four variants an instance wears, mirrored or
+   not, and a little colour of its own (value +-8 %, a touch warmer or
+   cooler), all from its seed. */
+var GLSL_SPRITE_V = [
+  'vec2 spriteUv(vec2 q, float seed, out float flip, out vec3 jit){',
+  '  float v = floor(fract(seed * 7.31) * 4.0);',
+  '  flip = step(0.5, fract(seed * 3.17));',
+  '  float h = fract(seed * 13.7) * 2.0 - 1.0, val = fract(seed * 29.3) * 2.0 - 1.0;',
+  '  jit = (1.0 + 0.08 * val) * vec3(1.0 + 0.05 * h, 1.0, 1.0 - 0.06 * h);',
+  '  vec2 u = vec2(mix(q.x, 1.0 - q.x, flip), q.y) * 0.992 + 0.004;',
+  '  return (u + vec2(mod(v, 2.0), 1.0 - floor(v * 0.5))) * 0.5;',
+  '}'
+].join('\n');
+/* Fragment side: a normal for the card from where the pixel sits in the
+   crown ellipse (rounding off toward its rim), wrapped diffuse so the shade
+   side is not black, light through the thin edges when the sun is behind,
+   and the underside of the crown in its own shade. Needs GLSL_COMMON. */
+var GLSL_SPRITE_F = [
+  'vec3 spriteLight(vec2 q, vec4 crown, float flip, vec3 right, vec3 toCam, float alpha, vec3 amb, float sh){',
+  '  vec2 e = (q - vec2(mix(crown.x, 1.0 - crown.x, flip), crown.y)) / crown.zw;',
+  '  float r = length(e);',
+  '  e /= max(r, 1.0);',
+  '  vec3 N = normalize(right * e.x + vec3(0.0, e.y, 0.0) + toCam * (sqrt(max(1.0 - dot(e, e), 0.0)) + 0.2));',
+  '  vec3 L = normalize(uSunDir);',
+  '  float wrap = max((dot(N, L) + 0.45) / 1.45, 0.0);',
+  '  float thin = clamp(smoothstep(0.6, 1.15, r) + (1.0 - smoothstep(0.4, 0.9, alpha)), 0.0, 1.0);',
+  '  float trans = pow(max(dot(-toCam, L), 0.0), 2.0) * (0.2 + 0.8 * thin) * 0.6;',
+  '  float under = mix(0.55, 1.0, smoothstep(-1.0, 0.3, e.y));',
+  '  return hemi(N, amb) * under + uSunCol * (wrap * 1.0 * mix(0.7, 1.0, under) + trans) * sh;',
+  '}'
+].join('\n');
 
 function makeBirdTexture() {
   var S = 64, c = cnv(S, S), g = c.getContext('2d');
@@ -4961,12 +5004,14 @@ function trunkTemplate(R, kind) {
   var shape = kind === 'pine' ? (R.f() < 0.7 ? 'straight' : 'leaning')
             : (kind === 'olive' ? (R.f() < 0.5 ? 'sinuous' : 'buttressed') : R.pick(TRUNK_SHAPES));
   var top = kind === 'pine' ? R.range(0.76, 0.88) : R.range(0.46, 0.66);
-  var baseR = kind === 'pine' ? R.range(0.026, 0.036) : R.range(0.034, 0.052);
-  var lean = 0, lean2 = 0, curve = 0, flare = 0.9, flareK = 6.0, taper = 0.35, sides = 20;
+  /* A trunk a twentieth of the tree's height across read as a post: real
+     ones are nearer a fortieth, and flare only a little at the foot. */
+  var baseR = kind === 'pine' ? R.range(0.012, 0.018) : R.range(0.016, 0.024);
+  var lean = 0, lean2 = 0, curve = 0, flare = 0.5, flareK = 6.0, taper = 0.35, sides = 20;
 
   if (shape === 'leaning')     { lean = R.range(0.10, 0.22) * (R.f() < 0.5 ? -1 : 1); lean2 = R.range(-0.08, 0.08); }
   else if (shape === 'sinuous'){ curve = R.range(0.05, 0.11); lean = R.range(-0.07, 0.07); }
-  else if (shape === 'buttressed') { flare = R.range(0.9, 1.5); flareK = R.range(3.2, 4.6); baseR *= 1.15; taper = 0.45; sides = 22; }
+  else if (shape === 'buttressed') { flare = R.range(0.45, 0.75); flareK = R.range(3.2, 4.6); baseR *= 1.15; taper = 0.45; sides = 22; }
   else                          { lean = R.range(-0.05, 0.05); lean2 = R.range(-0.05, 0.05); }
 
   var ph = R.range(0, 6.283), ph2 = R.range(0, 6.283);
@@ -5011,7 +5056,7 @@ function trunkTemplate(R, kind) {
     var ax = lean * tq * tq + curve * Math.sin(tq * 3.4 + ph) * (0.25 + tq * 0.75);
     var az = lean2 * tq * tq + curve * 0.7 * Math.sin(tq * 2.7 + ph2) * (0.25 + tq * 0.75);
     var ex = ax + Math.cos(th) * reach, ez = az + Math.sin(th) * reach;
-    var br = limbPath([ax, y0, az], [ex, y0 + rise, ez], [(ax + ex) * 0.5, y0 + rise * 0.3, (az + ez) * 0.5], baseR * 0.4, 5);
+    var br = limbPath([ax, y0, az], [ex, y0 + rise, ez], [(ax + ex) * 0.5, y0 + rise * 0.3, (az + ez) * 0.5], baseR * 0.55, 5);
     pushTube(B, br.path, br.radii, 8);
     tips.push([ex, y0 + rise, ez]);
     tips.push([(ax + ex) * 0.62, y0 + rise * 0.55, (az + ez) * 0.62]);
@@ -5023,7 +5068,7 @@ function trunkTemplate(R, kind) {
     var th2 = th + R.range(-1.1, 1.1), r2 = reach * R.range(0.35, 0.55);
     var fx = ex + Math.cos(th2) * r2, fz = ez + Math.sin(th2) * r2, fy = y0 + rise + R.range(0.04, 0.14);
     var br2 = limbPath([ex * 0.85 + ax * 0.15, y0 + rise * 0.8, ez * 0.85 + az * 0.15], [fx, fy, fz],
-                       [(ex + fx) * 0.5, y0 + rise * 0.9, (ez + fz) * 0.5], baseR * 0.24, 4);
+                       [(ex + fx) * 0.5, y0 + rise * 0.9, (ez + fz) * 0.5], baseR * 0.34, 4);
     pushTube(B, br2.path, br2.radii, 6);
     tips.push([fx, fy, fz]);
     for (sp = 2; sp <= 3; sp++) tips.push([br2.path[sp][0], br2.path[sp][1], br2.path[sp][2], 1]);
@@ -5036,74 +5081,98 @@ function trunkTemplate(R, kind) {
 
 function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
   if (!items.length) return;
+  /* a stream of its own, so how these are grown moves nothing else */
+  var NR = RNG(P.base + '/build/near/' + kind + (P.nonce ? '/' + P.nonce : ''));
   var bark = kind === 'pine' ? '#4a3a2c' : (kind === 'olive' ? '#6b6152' : (kind === 'palm' ? '#6f5b3f' : '#5a4636'));
   /* pines are deeply fissured, olives finely so, a broadleaf in between */
-  var barkN = kind === 'pine' ? R.range(11, 15) : (kind === 'olive' ? R.range(22, 30) : R.range(15, 22));
+  var barkN = kind === 'pine' ? NR.range(11, 15) : (kind === 'olive' ? NR.range(22, 30) : NR.range(15, 22));
   var mat = solidMat(U, bark, { rib: 0, grain: 1, barkN: barkN, barkPlate: kind === 'pine' ? 3.5 : 6.0, aoH: 0.6 });
   /* One trunk served every tree in the world, so a wood was the same tree
      stamped out and turned: the same lean, the same curve, the same ratio.
      Grow a few and deal them out. */
   var forms = Math.min(items.length, kind === 'pine' ? 3 : 4), f;
   var tpls = [];
-  for (f = 0; f < forms; f++) tpls.push(trunkTemplate(R, kind));
+  for (f = 0; f < forms; f++) tpls.push(trunkTemplate(NR, kind));
   var solids = [], rots = [], form = [];
   for (var i = 0; i < items.length; i++) {
-    var rot0 = R.range(0, 6.283);
+    var rot0 = NR.range(0, 6.283);
     rots.push(rot0);
     form.push(i % forms);
     solids.push([items[i][0], H(items[i][0], items[i][1]) - 0.05, items[i][1], items[i][2], rot0, 1, 1]);
+    /* the solid tree casts its own shadow (the billboard of the same tree
+       in the hand-over band does not) */
+    App._shadows.push([items[i][0], H(items[i][0], items[i][1]), items[i][1], items[i][2] * 0.34, 1.0, items[i][2] * 0.85]);
   }
   for (f = 0; f < forms; f++) {
     var part = [];
     for (i = 0; i < items.length; i++) if (form[i] === f) part.push(solids[i]);
     if (part.length) instanceSolid(scene, tpls[f], part, mat);
   }
-  /* the crown: a volume of leaf sprays. Each card knows how deep in the crown
-     it sits: darker inside, lighter on top and on the sun side. */
+  /* The crown: a volume of leaf sprays, each card a hand's span of twigs
+     rather than a third of the tree. Every card knows the middle of its
+     crown and how big it is, and is lit in the shader as part of that
+     volume: rounding away from the sun, darker deep inside and underneath,
+     glowing at the edge when the sun is behind it. */
   var cards = [];
-  var sunRight = Math.sin(P.sunAz) > 0 ? 1 : -1;
   for (var k = 0; k < items.length; k++) {
     var sz = items[k][2], rot = rots[k], cr = Math.cos(rot), sr = Math.sin(rot);
     var tips = tpls[form[k]].userData.tips || [];
     var treePh = items[k][0] * 0.3 + items[k][1] * 0.2;
     var wide = kind === 'acacia' ? 1.7 : 1;
+    var dk = Math.hypot(items[k][0], items[k][1]);
+    var fade = 1;
+    var mine = [];
     if (kind === 'pine') {
       /* tiers of sprays hugging the trunk, wider at the bottom */
-      var n = 20, ry = sz * 0.40;
+      var n = 32;
       for (var c = 0; c < n; c++) {
-        var tt = c / (n - 1), th = R.range(0, 6.283), rad = sz * 0.16 * (1.1 - tt) * R.range(0.5, 1.0);
+        var tt = c / (n - 1), th = NR.range(0, 6.283), rad = sz * 0.17 * (1.1 - tt) * NR.range(0.45, 1.0);
         var ox = Math.cos(th) * rad, oz = Math.sin(th) * rad, oy = sz * (0.22 + tt * 0.62);
-        var cs = sz * 0.30 * (1.05 - tt * 0.35);
-        var shade = 0.55 + 0.30 * tt + 0.15 * (ox / (sz * 0.16)) * sunRight;
-        cards.push([items[k][0] + ox, items[k][1] + oz, cs, oy - cs * 0.5, clamp(shade, 0.35, 1.15), R.range(0, 6.283), treePh + R.range(-1.4, 1.4)]);
+        var cs = sz * 0.20 * (1.05 - tt * 0.35);
+        mine.push([items[k][0] + ox, items[k][1] + oz, cs, oy - cs * 0.5, NR.range(0, 6.283), treePh + NR.range(-1.4, 1.4)]);
       }
     } else {
-      /* two or three sprays on every branch tip, so nothing hangs in air */
+      /* sprays on every branch tip and along the limbs, so nothing hangs in air */
       for (var ti = 0; ti < tips.length; ti++) {
         var tp = tips[ti];
         var lx = tp[0] * sz, ly = tp[1] * sz, lz = tp[2] * sz;
         var wx = (lx * cr - lz * sr) * wide, wz = (lx * sr + lz * cr) * wide;   /* the tree's own rotation */
-        var reps = ti === 0 ? 4 : (tp[3] ? 1 : (R.f() < 0.5 ? 2 : 3));
+        var reps = ti === 0 ? 6 : (tp[3] ? 2 : (NR.f() < 0.5 ? 3 : 5));
         for (var q2 = 0; q2 < reps; q2++) {
-          var cs2 = sz * R.range(0.30, 0.44) * (kind === 'acacia' ? 0.8 : 1);
-          var jx = R.range(-0.32, 0.32) * cs2 * 0.6, jy = R.range(-0.2, 0.4) * cs2 * 0.5, jz = R.range(-0.32, 0.32) * cs2 * 0.6;
-          var outward = Math.sqrt(wx * wx + wz * wz) / (sz * 0.34);
-          var shade2 = 0.50 + 0.30 * clamp(ly / (sz * 0.9), 0, 1) + 0.15 * clamp(outward, 0, 1) + 0.15 * (wx / (sz * 0.34)) * sunRight;
-          cards.push([items[k][0] + wx + jx, items[k][1] + wz + jz, cs2, ly + jy - cs2 * 0.5, clamp(shade2, 0.35, 1.15), R.range(0, 6.283), treePh + R.range(-1.4, 1.4)]);
+          var cs2 = sz * NR.range(0.16, 0.24) * (kind === 'acacia' ? 0.85 : 1);
+          var jx = NR.range(-0.5, 0.5) * cs2, jy = NR.range(-0.3, 0.5) * cs2 * 0.7, jz = NR.range(-0.5, 0.5) * cs2;
+          mine.push([items[k][0] + wx + jx, items[k][1] + wz + jz, cs2, ly + jy - cs2 * 0.5, NR.range(0, 6.283), treePh + NR.range(-1.4, 1.4)]);
         }
       }
     }
+    /* the crown's middle and reach, from the cards themselves */
+    var gx = 0, gy = 0, gz = 0, m2;
+    for (m2 = 0; m2 < mine.length; m2++) { gx += mine[m2][0]; gy += mine[m2][3] + mine[m2][2] * 0.5; gz += mine[m2][1]; }
+    gx /= mine.length; gy /= mine.length; gz /= mine.length;
+    var reach = 0.1, reachY = 0.1;
+    for (m2 = 0; m2 < mine.length; m2++) {
+      reach = Math.max(reach, Math.hypot(mine[m2][0] - gx, mine[m2][1] - gz) + mine[m2][2] * 0.35);
+      reachY = Math.max(reachY, Math.abs(mine[m2][3] + mine[m2][2] * 0.5 - gy) + mine[m2][2] * 0.35);
+    }
+    var base = H(items[k][0], items[k][1]);
+    for (m2 = 0; m2 < mine.length; m2++) cards.push(mine[m2].concat([gx, base + gy, gz, reach, reachY, fade]));
   }
   var quad = new THREE.PlaneGeometry(1, 1); quad.translate(0, 0.5, 0);
   var geo = new THREE.InstancedBufferGeometry();
   geo.index = quad.index; geo.setAttribute('position', quad.attributes.position); geo.setAttribute('uv', quad.attributes.uv);
   var iPos = new Float32Array(cards.length * 3), iAttr = new Float32Array(cards.length * 4);
+  var iCrown = new Float32Array(cards.length * 4), iShape = new Float32Array(cards.length * 2);
   for (var q = 0; q < cards.length; q++) {
-    iPos[q * 3] = cards[q][0]; iPos[q * 3 + 1] = H(cards[q][0], cards[q][1]) + cards[q][3]; iPos[q * 3 + 2] = cards[q][1];
-    iAttr[q * 4] = cards[q][2]; iAttr[q * 4 + 1] = cards[q][5]; iAttr[q * 4 + 2] = cards[q][4]; iAttr[q * 4 + 3] = cards[q][6];
+    var cd = cards[q];
+    iPos[q * 3] = cd[0]; iPos[q * 3 + 1] = H(cd[0], cd[1]) + cd[3]; iPos[q * 3 + 2] = cd[1];
+    iAttr[q * 4] = cd[2]; iAttr[q * 4 + 1] = cd[4]; iAttr[q * 4 + 2] = cd[11]; iAttr[q * 4 + 3] = cd[5];
+    iCrown[q * 4] = cd[6]; iCrown[q * 4 + 1] = cd[7]; iCrown[q * 4 + 2] = cd[8]; iCrown[q * 4 + 3] = cd[9];
+    iShape[q * 2] = cd[10]; iShape[q * 2 + 1] = 0;
   }
   geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
   geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 4));
+  geo.setAttribute('iCrown', new THREE.InstancedBufferAttribute(iCrown, 4));
+  geo.setAttribute('iShape', new THREE.InstancedBufferAttribute(iShape, 2));
   geo.instanceCount = cards.length;
   var cmat = new THREE.ShaderMaterial({
     uniforms: {
@@ -5111,17 +5180,18 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
       uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol, uFogCol: U.uFogCol,
       uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow, uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale,
       uSnow: U.uSnow, uCamPos: U.uCamPos,
-      uMap: { value: makeSprayTexture(kind, P, R) }
+      uMap: { value: makeSprayTexture(kind, P, NR) }
     },
     alphaToCoverage: true, alphaTest: 0.4, side: THREE.DoubleSide,
     vertexShader: [
-      'attribute vec3 iPos; attribute vec4 iAttr;',
+      'attribute vec3 iPos; attribute vec4 iAttr; attribute vec4 iCrown; attribute vec2 iShape;',
       'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow;',
       'uniform vec2 uWindDir; uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
+      'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
+      'varying vec3 vWp; varying vec4 vCrown; varying float vRy, vSh, vFade; varying vec3 vAmb;',
       GLSL_COMMON,
       'void main(){',
-      '  float size = iAttr.x, spin = iAttr.y, shade = iAttr.z, ph = iAttr.w;',
+      '  float size = iAttr.x, spin = iAttr.y, ph = iAttr.w;',
       '  vec3 toCam = normalize(uCamPos - iPos);',
       '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
       '  vec3 up = normalize(cross(toCam, right));',
@@ -5131,13 +5201,12 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
       /* a slow common sway from the gust wave, a quicker rustle per spray */
       '  float gustW = sin(dot(iPos.xz, uWindDir) * 0.22 - uTime * 1.55);',
       '  float sway = gustW * 0.55 + sin(uTime * 1.9 + ph) * 0.30 + sin(uTime * 0.8 + ph * 1.4) * 0.15;',
-      '  lp.xz += uWindDir * sway * uWind * (0.3 + 0.7 * uGust) * size * 0.07;',
+      '  lp.xz += uWindDir * sway * uWind * (0.3 + 0.7 * uGust) * size * 0.12;',
       '  vec3 wp = iPos + vec3(0.0, size * 0.5, 0.0) + lp;',
-      '  vec3 sd = normalize(uSunDir);',
       '  vec2 bk = bakedRG(wp.xz);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-      '  float back = pow(max(dot(-toCam, sd), 0.0), 3.0) * 0.45;',
-      '  vTint = (hemi(vec3(0.0, 0.4, 0.0), uAmbCol) * mix(1.0, bk.y, 0.5) + uSunCol * (0.75 + back) * sh) * shade * (1.0 - uSnow * 0.2);',
+      '  vSh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
+      '  vAmb = uAmbCol * mix(1.0, bk.y, 0.5) * (1.0 - uSnow * 0.2);',
+      '  vWp = wp; vCrown = iCrown; vRy = iShape.x; vFade = iAttr.z;',
       '  vUv = uv;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
@@ -5147,12 +5216,26 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
     ].join('\n'),
     fragmentShader: [
       GLSL_TONE,
-      'uniform sampler2D uMap;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
+      'uniform sampler2D uMap; uniform vec3 uSunDir, uSunCol, uCamPos;',
+      'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
+      'varying vec3 vWp; varying vec4 vCrown; varying float vRy, vSh, vFade; varying vec3 vAmb;',
+      GLSL_COMMON,
       'void main(){',
       '  vec4 t = texture2D(uMap, vUv);',
       '  if (t.a < 0.25) discard;',
-      '  gl_FragColor = vec4(mix(t.rgb * vTint, vHaze, vFog), smoothstep(0.3, 0.7, t.a));',
+      /* where this pixel sits in its crown, as a fraction of the crown */
+      '  vec3 e = (vWp - vCrown.xyz) / vec3(vCrown.w, vRy, vCrown.w);',
+      '  float r = length(e);',
+      '  vec3 N = e / max(r, 1e-3);',
+      '  vec3 L = normalize(uSunDir), V = normalize(uCamPos - vWp);',
+      '  float wrap = max((dot(N, L) + 0.5) / 1.5, 0.0);',
+      /* deep inside, the leaves see neither sun nor sky; at the rim, light
+         comes through them from behind */
+      '  float inner = smoothstep(0.1, 0.9, r);',
+      '  float under = mix(0.68, 1.0, smoothstep(-0.9, 0.3, N.y));',
+      '  float trans = pow(max(dot(-V, L), 0.0), 2.0) * smoothstep(0.55, 1.05, r) * 0.7;',
+      '  vec3 light = hemi(N, vAmb * 1.1) * mix(0.62, 1.0, inner) * under + uSunCol * (wrap * 1.1 * mix(0.5, 1.0, inner) * under + trans) * vSh;',
+      '  gl_FragColor = vec4(mix(t.rgb * light, vHaze, vFog), smoothstep(0.3, 0.7, t.a) * vFade);',
       '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
       '}'
     ].join('\n')
@@ -5162,7 +5245,6 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
   scene.add(m);
   App.propMeshes.push(m);
 }
-
 
 
 
@@ -6419,7 +6501,7 @@ function boundaryBillboards(scene, P, R, U, H, items, kind) {
   geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
   geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 2));
   geo.instanceCount = items.length;
-  var mat = propBillboardMat(U, makePropTexture(kind, P, R, { far: true }), kind === 'hedge' ? 0.02 : 0.03, spriteAspect(kind));
+  var mat = propBillboardMat(U, makePropTexture(kind, P, R, { far: true }), kind === 'hedge' ? 0.02 : 0.03, spriteAspect(kind), kind);
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
   scene.add(m);
@@ -6427,7 +6509,7 @@ function boundaryBillboards(scene, P, R, U, H, items, kind) {
 }
 
 /* a plain lit billboard, for things that only need to stand there and sway */
-function propBillboardMat(U, map, sway, aspect) {
+function propBillboardMat(U, map, sway, aspect, kind) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime, uWind: U.uWind, uGust: U.uGust, uWindDir: U.uWindDir,
@@ -6435,15 +6517,18 @@ function propBillboardMat(U, map, sway, aspect) {
       uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow,
       uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale,
       uSnow: U.uSnow, uCamPos: U.uCamPos,
-      uMap: { value: map }, uSway: { value: sway }, uAspect: { value: aspect || 1.0 }
+      uMap: { value: map }, uSway: { value: sway }, uAspect: { value: aspect || 1.0 },
+      uCrown: { value: spriteCrown(kind) }
     },
     alphaTest: 0.25, side: THREE.DoubleSide,
     vertexShader: [
       'attribute vec3 iPos; attribute vec2 iAttr;',
       'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uSway, uAspect;',
       'uniform vec2 uWindDir; uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
+      'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
+      'varying vec2 vQ; varying float vFlip, vSh; varying vec3 vJit, vRight, vToCam, vAmb;',
       GLSL_COMMON,
+      GLSL_SPRITE_V,
       'void main(){',
       '  float size = iAttr.x;',
       '  vec3 toCam = normalize(vec3(uCamPos.x - iPos.x, 0.0, uCamPos.z - iPos.z));',
@@ -6453,10 +6538,11 @@ function propBillboardMat(U, map, sway, aspect) {
       '  lp.xz += uWindDir * sway * uWind * (0.3 + 0.7 * uGust) * size * uSway * position.y * position.y;',
       '  vec3 wp = iPos + lp;',
       '  vec2 bk = bakedRG(wp.xz);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-      '  float back = pow(max(dot(-toCam, normalize(uSunDir)), 0.0), 3.0) * 0.35;',
-      '  vTint = (hemi(vec3(0.0, mix(-0.2, 0.9, position.y), 0.0), uAmbCol * 0.9) * mix(1.0, bk.y, 0.5) + uSunCol * (0.6 + back) * sh) * (1.0 - uSnow * 0.25);',
-      '  vUv = uv;',
+      '  vSh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
+      '  vAmb = uAmbCol * 0.95 * mix(1.0, bk.y, 0.5);',
+      '  vQ = uv; vRight = right; vToCam = toCam;',
+      '  vUv = spriteUv(uv, iAttr.y, vFlip, vJit);',
+      '  vJit *= 1.0 - uSnow * 0.25;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
       '  vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, vFog);',
@@ -6465,12 +6551,16 @@ function propBillboardMat(U, map, sway, aspect) {
     ].join('\n'),
     fragmentShader: [
       GLSL_TONE,
-      'uniform sampler2D uMap;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
+      'uniform sampler2D uMap; uniform vec3 uSunDir, uSunCol; uniform vec4 uCrown;',
+      'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
+      'varying vec2 vQ; varying float vFlip, vSh; varying vec3 vJit, vRight, vToCam, vAmb;',
+      GLSL_COMMON,
+      GLSL_SPRITE_F,
       'void main(){',
       '  vec4 t = texture2D(uMap, vUv);',
       '  if (t.a < 0.25) discard;',
-      '  gl_FragColor = vec4(mix(t.rgb * vTint, vHaze, vFog), smoothstep(0.3, 0.7, t.a));',
+      '  vec3 light = spriteLight(vQ, uCrown, vFlip, vRight, vToCam, t.a, vAmb, vSh);',
+      '  gl_FragColor = vec4(mix(t.rgb * vJit * light, vHaze, vFog), smoothstep(0.3, 0.7, t.a));',
       '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
       '}'
     ].join('\n')
@@ -7220,7 +7310,9 @@ function buildCritters(scene, P, R, U, H) {
    Everything within a dozen metres is where the eye actually lands, so it gets
    its own scatter of stones, litter and tufts lying flat on the ground. */
 function makeSprayTexture(kind, P, R) {
-  var S = 128, c = cnv(S, S), g = c.getContext('2d');
+  /* a hand's span of twig: many small leaves at 256 square, so a card no
+     longer shows a dozen leaves the size of plates */
+  var S = 256, c = cnv(S, S), g = c.getContext('2d');
   var base, lite, lw = 0.038, ll = 0.064, n = 125;
   if (kind === 'pine') { base = new THREE.Color('#1f3a2a').multiplyScalar(P.treeTint); lite = base.clone().lerp(new THREE.Color('#7fa066'), 0.5); lw = 0.013; ll = 0.085; n = 150; }
   else if (kind === 'olive') { base = new THREE.Color('#6f7d5c'); lite = new THREE.Color('#b9c2a0'); lw = 0.017; ll = 0.054; n = 140; }
@@ -7228,12 +7320,12 @@ function makeSprayTexture(kind, P, R) {
   else if (kind === 'acacia') { base = new THREE.Color('#4e5a2e').multiplyScalar(P.treeTint); lite = base.clone().lerp(new THREE.Color('#b3ba78'), 0.5); lw = 0.012; ll = 0.022; n = 180; }
   else { base = new THREE.Color(P.leafDark || P.grass.base).multiplyScalar(0.9 * P.treeTint); lite = new THREE.Color(P.leafLight || P.grass.tip).multiplyScalar(0.95 * P.treeTint); }
   /* twigs radiating from the middle, then the leaves on top of them */
-  g.strokeStyle = '#4b3a2b'; g.lineWidth = 2.2; g.lineCap = 'round';
+  g.strokeStyle = '#4b3a2b'; g.lineWidth = 3.0; g.lineCap = 'round';
   for (var tw = 0; tw < 5; tw++) {
     var ta = R.f() * 6.283, tl = S * R.range(0.22, 0.42);
     g.beginPath(); g.moveTo(S * 0.5, S * 0.5); g.lineTo(S * 0.5 + Math.cos(ta) * tl, S * 0.5 + Math.sin(ta) * tl); g.stroke();
   }
-  leafSpray(g, S / 2, S / 2, S * 0.44, base.clone().multiplyScalar(0.7), lite, n, S * lw, S * ll, R);
+  leafSpray(g, S / 2, S / 2, S * 0.44, base.clone().multiplyScalar(0.7), lite, Math.round(n * 2.4), S * lw * 0.62, S * ll * 0.62, R);
   return tex(c, false);
 }
 
@@ -7549,16 +7641,19 @@ function propMat(U, P, R, kind, swayMul, far) {
         uSunCol: U.uSunCol, uAmbCol: U.uAmbCol, uFogCol: U.uFogCol, uSunDir: U.uSunDir,
         uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uShadow: U.uShadow, uShadowMap: U.uShadowMap, uShadowOrigin: U.uShadowOrigin, uShadowScale: U.uShadowScale, uSnow: U.uSnow,
         uCamPos: U.uCamPos, uSway: { value: swayMul }, uAspect: { value: spriteAspect(kind) },
+        uCrown: { value: spriteCrown(kind) },
         uMap: { value: makePropTexture(kind, P, R, { far: !!far }) }
       },
       alphaToCoverage: true, alphaTest: 0.4,
       side: THREE.DoubleSide,
       vertexShader: [
-        'attribute vec3 iPos; attribute vec2 iAttr;',
+        'attribute vec3 iPos; attribute vec3 iAttr;',
         'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uSway, uAspect;',
         'uniform vec2 uWindDir; uniform vec3 uCamPos, uSunCol, uAmbCol, uFogCol, uSunDir;',
-        'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
+        'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
+        'varying vec2 vQ; varying float vFlip, vSh, vFade; varying vec3 vJit, vRight, vToCam, vAmb;',
         GLSL_COMMON,
+        GLSL_SPRITE_V,
         'void main(){',
         '  float size = iAttr.x;',
         '  vec3 toCam = normalize(vec3(uCamPos.x - iPos.x, 0.0, uCamPos.z - iPos.z));',
@@ -7567,11 +7662,13 @@ function propMat(U, P, R, kind, swayMul, far) {
         '  float sway = sin(uTime * 0.62 + iAttr.y) * 0.5 + sin(uTime * 0.27 + iAttr.y * 2.1) * 0.5;',
         '  lp.xz += uWindDir * sway * uWind * (0.35 + 0.75 * uGust) * position.y * position.y * size * uSway;',
         '  vec3 wp = iPos + lp;',
-        '  vUv = uv;',
+        '  vQ = uv; vFade = iAttr.z;',
+        '  vUv = spriteUv(uv, iAttr.y, vFlip, vJit);',
+        '  vJit *= 1.0 - uSnow * 0.25;',
+        '  vRight = right; vToCam = toCam;',
         '  vec2 bk = bakedRG(wp.xz);',
-        '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-        '  float back = pow(max(dot(-toCam, normalize(uSunDir)), 0.0), 3.0) * 0.35;',
-        '  vTint = (hemi(vec3(0.0, mix(-0.2, 0.9, position.y), 0.0), uAmbCol * 0.9) * mix(1.0, bk.y, 0.5) + uSunCol * (0.6 + back) * sh) * (1.0 - uSnow * 0.25);',
+        '  vSh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
+        '  vAmb = uAmbCol * 0.95 * mix(1.0, bk.y, 0.5);',
         '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
         '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
         '  vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, vFog);',
@@ -7580,12 +7677,16 @@ function propMat(U, P, R, kind, swayMul, far) {
       ].join('\n'),
       fragmentShader: [
       GLSL_TONE,
-        'uniform sampler2D uMap; uniform vec3 uFogCol;',
-        'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
+        'uniform sampler2D uMap; uniform vec3 uFogCol, uSunDir, uSunCol; uniform vec4 uCrown;',
+        'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
+        'varying vec2 vQ; varying float vFlip, vSh, vFade; varying vec3 vJit, vRight, vToCam, vAmb;',
+        GLSL_COMMON,
+        GLSL_SPRITE_F,
         'void main(){',
         '  vec4 t = texture2D(uMap, vUv);',
         '  if (t.a < 0.25) discard;',
-        '  gl_FragColor = vec4(mix(t.rgb * vTint, vHaze, vFog), smoothstep(0.3, 0.7, t.a));',
+        '  vec3 light = spriteLight(vQ, uCrown, vFlip, vRight, vToCam, t.a, vAmb, vSh);',
+        '  gl_FragColor = vec4(mix(t.rgb * vJit * light, vHaze, vFog), smoothstep(0.3, 0.7, t.a) * vFade);',
         '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
       '}'
       ].join('\n')
@@ -7642,15 +7743,26 @@ function buildProps(scene, P, R, U, H) {
     }
     if (!items.length) continue;
 
-    /* the nearest trees are built solid; everything beyond stays a billboard */
+    /* The nearest trees are built solid; everything beyond stays a billboard.
+       Between 36 and 48 m each tree is one or the other by a coin weighted by
+       its distance, so there is no line on the ground where trees change
+       kind. (Fading one into the other left every tree in the band half
+       transparent.) Both are lit as the same rounded crown. */
     var treeish = /broadleaf|olive|blossom|acacia|pine/.test(spec.kind);
     var nearItems = [];
     if (treeish) {
       var farItems = [];
-      for (var ni = 0; ni < items.length; ni++) (Math.hypot(items[ni][0], items[ni][1]) < 42 ? nearItems : farItems).push(items[ni]);
+      for (var ni = 0; ni < items.length; ni++) {
+        var dn = Math.hypot(items[ni][0], items[ni][1]);
+        var coin = ihash(Math.round(items[ni][0] * 10), Math.round(items[ni][1] * 10), 4242);
+        (dn < 36 || (dn < 48 && coin >= smoothstep(36, 48, dn)) ? nearItems : farItems).push(items[ni]);
+      }
       items = farItems;
       if (!items.length && !nearItems.length) continue;
     }
+    /* the band's billboards take their seed from a stream of their own, so the
+       builder's stream is drawn exactly as before */
+    var BS = RNG(P.base + '/build/band/' + si + (P.nonce ? '/' + P.nonce : ''));
 
     var quad = new THREE.PlaneGeometry(1, 1);
     quad.translate(0, 0.5, 0);
@@ -7659,19 +7771,21 @@ function buildProps(scene, P, R, U, H) {
     geo.setAttribute('position', quad.attributes.position);
     geo.setAttribute('uv', quad.attributes.uv);
     var iPos = new Float32Array(items.length * 3);
-    var iAttr = new Float32Array(items.length * 2);
+    var iAttr = new Float32Array(items.length * 3);
     for (var i = 0; i < items.length; i++) {
+      var di = Math.hypot(items[i][0], items[i][1]);
       iPos[i * 3] = items[i][0];
       /* on a slope the card's downhill corner would stand on air: sink it by
          the drop across its own half-width */
       iPos[i * 3 + 1] = H(items[i][0], items[i][1]) - items[i][2] * ((spec.line ? 0.09 : 0.03) + (items[i][3] || 0)) + (spec.lift || 0) * items[i][2]
         - slopeAt(H, items[i][0], items[i][1]) * items[i][2] * spriteAspect(spec.kind) * 0.5;
       iPos[i * 3 + 2] = items[i][1];
-      iAttr[i * 2] = items[i][2];
-      iAttr[i * 2 + 1] = R.range(0, 6.283);
+      iAttr[i * 3] = items[i][2];
+      iAttr[i * 3 + 1] = (!treeish || di >= 42) ? R.range(0, 6.283) : BS.range(0, 6.283);
+      iAttr[i * 3 + 2] = 1;
     }
     geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
-    geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 2));
+    geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 3));
     geo.instanceCount = items.length;
 
     /* rocks don't sway; palms and fronds do, a lot */
@@ -7698,6 +7812,7 @@ function buildProps(scene, P, R, U, H) {
     if (nearItems.length) buildNearTrees(scene, P, R, U, H, spec.kind, nearItems, spec);
     for (var si2 = 0; si2 < items.length; si2++) {
       if (items[si2][3]) continue;                /* a sunk crown in the wood band */
+      if (treeish && Math.hypot(items[si2][0], items[si2][1]) < 48) continue;   /* cast by the solid tree */
       App._shadows.push([items[si2][0], H(items[si2][0], items[si2][1]), items[si2][1],
                          items[si2][2] * (spec.kind === 'rock' ? 0.55 : 0.34),
                          spec.kind === 'rock' ? 0.8 : 1.0, items[si2][2] * (spec.kind === 'rock' ? 0.6 : 0.85)]);
