@@ -569,8 +569,8 @@ var BIOMES = {
     flowers: false, dust: [5, 14], raptors: true,
     props: [{ kind: 'cactus', count: [14, 40], size: [2.2, 6.4], r: [8, 110] },
             { kind: 'rock', count: [6, 30], size: [0.6, 3.0], r: [8, 130] },
-            { kind: 'creosote', count: [14, 40], size: [0.9, 2.0], r: [5, 90] },
-            { kind: 'brittlebush', count: [8, 26], size: [0.5, 1.0], r: [4, 60] },
+            { kind: 'creosote', count: [14, 40], size: [1.0, 2.8], r: [5, 90] },
+            { kind: 'brittlebush', count: [8, 26], size: [0.55, 1.2], r: [4, 60] },
             { kind: 'deadbush', count: [4, 16], size: [0.5, 1.2], r: [6, 70] }],
     critters: true,
     haze: [1.09, 0.99, 0.84],
@@ -641,7 +641,7 @@ var BIOMES = {
     label: 'canyon', w: 10, terrain: 'canyon', palettes: CANYON_PALETTES,
     cover: 6000, coverH: [0.12, 0.30], coverChance: 0.55, coverVar: [0.2, 0.8], flowers: false,
     props: [{ kind: 'rock', count: [14, 50], size: [0.8, 5.0], r: [10, 200] },
-            { kind: 'creosote', count: [8, 28], size: [0.9, 1.9], r: [8, 120] },
+            { kind: 'creosote', count: [8, 28], size: [1.0, 2.4], r: [8, 120] },
             { kind: 'deadbush', count: [4, 18], size: [0.5, 1.3], r: [8, 90] }],
     dust: [3, 10], raptors: true, critters: true,
     haze: [1.10, 0.98, 0.86],
@@ -1472,6 +1472,14 @@ function buildParams(seedStr, nonce) {
       size: sp.size, r: sp.r, seed: R.int(1, 99999)
     });
   }
+  /* A sand sea grows almost nothing: no cacti, no brittlebush, a few
+     creosote and dead shrubs in the hollows between the dunes, and the odd
+     stone where the sand is thin. Counts only; every draw is as it was. */
+  if (P.erg) for (var ep = 0; ep < P.props.length; ep++) {
+    var epk = P.props[ep];
+    epk.count = Math.round(epk.count * ({ cactus: 0, brittlebush: 0, rock: 0.15 }[epk.kind] != null
+      ? { cactus: 0, brittlebush: 0, rock: 0.15 }[epk.kind] : 0.4));
+  }
   P.treeline = B.treeline ? R.chance(0.5) : false;
   P.treelineKind = B.treeline || 'broadleaf';
   P.treeTint = R.range(0.8, 1.15);
@@ -2073,29 +2081,45 @@ function drawPropSprite(g, S, kind, P, R, opts) {
     }
 
   } else if (kind === 'creosote') {
-    /* many thin stems from one root, a haze of small leaves at their ends */
-    var cc = new THREE.Color(R.pick(['#5c6b3a', '#66753f', '#525f36']));
-    var cl = cc.clone().lerp(new THREE.Color('#b9c47a'), 0.5);
+    /* An open vase of thin grey stems from one crown, reaching the top of
+       the card (a creosote stands one to three metres), with small dark
+       olive leaves in loose clusters along their upper part: you see through
+       it to the ground behind. */
+    var cc = new THREE.Color(R.pick(['#4f5a30', '#58643a', '#4a552e']));
+    var cl = cc.clone().lerp(new THREE.Color('#a3ab68'), 0.45);
     g.lineCap = 'round';
-    for (var st = 0; st < 26; st++) {
-      var sa = -Math.PI * R.range(0.12, 0.88), sl = S * R.range(0.28, 0.46);
-      g.strokeStyle = '#6a5a44'; g.lineWidth = R.range(1.2, 2.6);
-      g.beginPath(); g.moveTo(S / 2 + R.range(-6, 6), S);
-      var ex2 = S / 2 + Math.cos(sa) * sl, ey2 = S + Math.sin(sa) * sl;
-      g.quadraticCurveTo(S / 2 + Math.cos(sa) * sl * 0.5 + R.range(-10, 10), S + Math.sin(sa) * sl * 0.5, ex2, ey2);
-      g.stroke();
-      leafSpray(g, ex2, ey2, S * 0.07, cc, cl, 16, S * 0.006, S * 0.012, R);
-      leafSpray(g, S / 2 + Math.cos(sa) * sl * 0.6, S + Math.sin(sa) * sl * 0.6, S * 0.05, cc, cl, 10, S * 0.006, S * 0.012, R);
+    var nst = R.int(14, 22);
+    for (var st = 0; st < nst; st++) {
+      var tilt = R.range(-0.62, 0.62), sl = S * R.range(0.55, 0.94) * (1 - Math.abs(tilt) * 0.3);
+      var x0 = S / 2 + R.range(-0.04, 0.04) * S, bend = R.range(-0.12, 0.12);
+      var ex2 = x0 + Math.sin(tilt) * sl, ey2 = S - Math.cos(tilt) * sl;
+      var mx2 = x0 + Math.sin(tilt + bend) * sl * 0.5, my2 = S - Math.cos(tilt + bend) * sl * 0.5;
+      g.strokeStyle = '#6e6250'; g.lineWidth = R.range(1.0, 2.2);
+      g.beginPath(); g.moveTo(x0, S); g.quadraticCurveTo(mx2, my2, ex2, ey2); g.stroke();
+      for (var lc = 0; lc < 4; lc++) {
+        var tq = R.range(0.45, 1.0), lx2 = (1 - tq) * (1 - tq) * x0 + 2 * (1 - tq) * tq * mx2 + tq * tq * ex2;
+        var ly2 = (1 - tq) * (1 - tq) * S + 2 * (1 - tq) * tq * my2 + tq * tq * ey2;
+        leafSpray(g, lx2, ly2, S * R.range(0.035, 0.06), cc, cl, 9, S * 0.0045, S * 0.010, R);
+      }
     }
   } else if (kind === 'brittlebush') {
-    var bc = new THREE.Color('#8fa07a'), bl2 = new THREE.Color('#d6dbb4');
-    var dome = S * R.range(0.30, 0.42);
-    for (var bs = 0; bs < 70; bs++) {
-      var ba2 = -Math.PI * R.f(), bd = Math.sqrt(R.f()) * dome;
-      leafSpray(g, S / 2 + Math.cos(ba2) * bd, S - Math.sin(ba2) * bd * 0.7, S * 0.045, bc.clone().multiplyScalar(0.7 + 0.3 * (1 - bd / dome)), bl2, 8, S * 0.008, S * 0.014, R);
+    /* a low dome of silvery felted leaves, wider than tall (the card is
+       wider than drawn), and in spring yellow daisies held above it on bare
+       stalks; dry brown stalks the rest of the year */
+    var bc = new THREE.Color('#8e9a80'), bl2 = new THREE.Color('#d5d9c0');
+    var drx = S * R.range(0.40, 0.46), dry = S * R.range(0.62, 0.78);
+    for (var bs = 0; bs < 110; bs++) {
+      var ba2 = -Math.PI * R.f(), bd = Math.sqrt(R.f());
+      var bx3 = S / 2 + Math.cos(ba2) * bd * drx, by3 = S - Math.sin(ba2) * bd * dry * 0.95;
+      leafSpray(g, bx3, by3, S * 0.05, bc.clone().multiplyScalar(0.62 + 0.38 * (S - by3) / dry), bl2, 9, S * 0.009, S * 0.016, R);
     }
-    g.fillStyle = '#e8c73a';
-    for (var fl = 0; fl < 16; fl++) { var fa = -Math.PI * R.range(0.15, 0.85), fd = dome * R.range(0.85, 1.15); g.beginPath(); g.arc(S / 2 + Math.cos(fa) * fd, S - Math.sin(fa) * fd * 0.7, S * 0.012, 0, 6.283); g.fill(); }
+    var bloom = P.seasonKey === 'spring' ? 1 : (P.seasonKey === 'summer' ? 0.35 : 0);
+    for (var fl = 0; fl < 22; fl++) {
+      var fx3 = S / 2 + R.range(-0.8, 0.8) * drx, fy3 = S - dry * R.range(0.95, 1.18) * Math.sqrt(Math.max(0.05, 1 - Math.pow((fx3 - S / 2) / drx, 2)));
+      g.strokeStyle = bloom > 0.5 ? '#7d8668' : '#8a7652'; g.lineWidth = 1.1;
+      g.beginPath(); g.moveTo(fx3, fy3 + S * 0.08); g.lineTo(fx3, fy3); g.stroke();
+      if (R.f() < bloom) { g.fillStyle = '#e8c53a'; g.beginPath(); g.arc(fx3, fy3, S * 0.014, 0, 6.283); g.fill(); }
+    }
   } else if (kind === 'acacia') {
     var ac = new THREE.Color(R.pick(['#4e5a2e', '#586633', '#46512a'])).multiplyScalar(P.treeTint);
     var alite = ac.clone().lerp(new THREE.Color('#b3ba78'), 0.5);
@@ -2217,6 +2241,7 @@ function drawPropSprite(g, S, kind, P, R, opts) {
    the builder's stream as it always was; the others from streams of their
    own, so nothing else in the world moves. Light is not painted in: the sun
    moves, and goes down, and the shader lights the crown (spriteLight). */
+var SPRITE_BURN = { creosote: 2835, brittlebush: 2413 };
 function makePropTexture(kind, P, R, opts) {
   var S = 256, c = cnv(S * 2, S * 2), g = c.getContext('2d');
   for (var v = 0; v < 4; v++) {
@@ -2224,7 +2249,12 @@ function makePropTexture(kind, P, R, opts) {
     g.translate((v & 1) * S, (v >> 1) * S);
     g.beginPath(); g.rect(0, 0, S, S); g.clip();
     g.lineCap = 'round'; g.lineJoin = 'round';
-    drawPropSprite(g, S, kind, P, v ? RNG(P.base + '/sprite/' + kind + '/' + v) : R, opts);
+    /* Redrawn kinds draw their first tile from a stream of their own too:
+       the builder's stream still takes the draws the old drawing took, so
+       the clock and everything built after stay put. */
+    var RV = R;
+    if (!v && SPRITE_BURN[kind]) { for (var bn = 0; bn < SPRITE_BURN[kind]; bn++) R.f(); RV = RNG(P.base + '/sprite/' + kind + '/0'); }
+    drawPropSprite(g, S, kind, P, v ? RNG(P.base + '/sprite/' + kind + '/' + v) : RV, opts);
     g.restore();
   }
   return tex(c, false);
@@ -2234,7 +2264,7 @@ function makePropTexture(kind, P, R, opts) {
    true proportions on a square canvas, so most kinds want a square card; a
    fixed narrow card squeezed every tree and bush into a column. Conifers stay
    a little narrower than drawn, and an acacia's crown spreads wider. */
-var SPRITE_ASPECT = { pine: 0.72, acacia: 1.4, creosote: 0.85, cactus: 0.62 };
+var SPRITE_ASPECT = { pine: 0.72, acacia: 1.4, creosote: 1.15, brittlebush: 1.3, cactus: 0.62 };
 function spriteAspect(kind) { return SPRITE_ASPECT[kind] || 1.0; }
 /* Where the bulk of each kind sits on its card, as an ellipse in card
    coordinates (x across, y up, centre and radii), for the shader to light
@@ -2244,7 +2274,7 @@ var SPRITE_CROWN = {
   broadleaf: [0.5, 0.62, 0.38, 0.32], olive: [0.5, 0.60, 0.36, 0.30], blossom: [0.5, 0.60, 0.36, 0.30],
   pine: [0.5, 0.50, 0.27, 0.42], acacia: [0.5, 0.58, 0.46, 0.22], palm: [0.5, 0.60, 0.34, 0.24],
   shrub: [0.5, 0.20, 0.32, 0.24], hedge: [0.5, 0.27, 0.46, 0.30], vine: [0.5, 0.24, 0.32, 0.22],
-  creosote: [0.5, 0.18, 0.40, 0.32], brittlebush: [0.5, 0.13, 0.38, 0.30], deadbush: [0.5, 0.10, 0.30, 0.22],
+  creosote: [0.5, 0.55, 0.40, 0.40], brittlebush: [0.5, 0.30, 0.44, 0.34], deadbush: [0.5, 0.10, 0.30, 0.22],
   cactus: [0.5, 0.5, 0.15, 4.0], rock: [0.5, 0.18, 0.44, 0.40]
 };
 function spriteCrown(kind) { var c = SPRITE_CROWN[kind] || SPRITE_CROWN.broadleaf; return new THREE.Vector4(c[0], c[1], c[2], c[3]); }
@@ -4333,6 +4363,9 @@ function coverHabit(P) {
     if (P.crop.name === 'strawberries') return { tuft: 1.0, n: [7, 12], sig: [0.06, 0.10], dome: 0.4, out: 0.8 };
     return { tuft: 1.0, n: [3, 6], sig: [0.025, 0.045], dome: 0.05, out: 0.15 };
   }
+  /* dry-country grass grows in tight separate tussocks with bare ground
+     between, never as a sward */
+  if (P.biomeKey === 'desert' || P.biomeKey === 'canyon') return { tuft: 0.95, n: [10, 22], sig: [0.05, 0.10], dome: 0.3, out: 0.65 };
   return { tuft: 0.45, n: [8, 18], sig: [0.08, 0.16], dome: 0.25, out: 0.4 };
 }
 
@@ -4384,6 +4417,7 @@ function buildGrass(scene, P, R, U, H) {
     if (z > -0.6) return 0;
     if (Math.abs(Math.atan2(x, -z)) > 1.30) return 0;
     if (P.pathKind && onPathAt(P, x, z) > GR.f() * 0.55) return 0;
+    if (P.erg && duneAt(P.dune, x, z) > P.dune.hd * 0.18) return 0;
     var hm = 1;
     /* the kept ground under the window: mown short, or nothing grows on it */
     if (P.clearKind) {
@@ -4848,13 +4882,41 @@ function finishGeo(B) {
    pleated column, the squat barrel, the flat pads, the rosette of blades, the
    whip-stemmed ocotillo. The ribs are geometry, so light catches them. */
 var CACTI = {
-  saguaro:  { body: '#5b7f55', spine: '#efe7c6', ribs: 16, spines: 1.0, tip: null, w: 5 },
-  barrel:   { body: '#7c8d3d', spine: '#d9a33a', ribs: 20, spines: 1.6, tip: '#c0552f', tipMix: 0.35, w: 3 },
-  pear:     { body: '#5e7e5b', spine: '#efe7c6', ribs: 0,  spines: 0.7, tip: null, w: 4 },
-  agave:    { body: '#6e8f89', spine: '#bfa88a', ribs: 0,  spines: 0.0, tip: '#4a2f22', tipMix: 0.55, w: 3 },
+  /* Grey-olive, as cacti are in a dry land: a waxy bloom and dust over the
+     green. Saturated green read as plastic. */
+  saguaro:  { body: '#5f7052', spine: '#e6dcbc', ribs: 18, spines: 1.0, tip: null, w: 5 },
+  barrel:   { body: '#76804c', spine: '#d29a3c', ribs: 20, spines: 1.6, tip: '#b8662f', tipMix: 0.35, w: 3 },
+  pear:     { body: '#6a7c5b', spine: '#e6dcbc', ribs: 0,  spines: 0.7, tip: null, w: 4 },
+  agave:    { body: '#768f86', spine: '#bfa88a', ribs: 0,  spines: 0.0, tip: '#4a2f22', tipMix: 0.55, w: 3 },
   ocotillo: { body: '#6a6150', spine: '#a89878', ribs: 0,  spines: 0.4, tip: '#c9402a', tipMix: 0.7, w: 2 },
-  cholla:   { body: '#8c9b74', spine: '#f2eedb', ribs: 6,  spines: 2.2, tip: null, w: 2 }
+  cholla:   { body: '#9a9b7c', spine: '#efe8d2', ribs: 6,  spines: 2.2, tip: null, w: 2 }
 };
+/* A saguaro in metres, Hs tall. It is a column a third to two thirds of a
+   metre thick whatever its height (so a young one is stout and an old one
+   slender), a lone spear until it is three or four metres tall, then one or
+   two arms, and an old giant two to five; arms never start lower than about
+   two and a half metres. */
+function saguaroTemplate(S, Hs) {
+  var B = { pos: [], nor: [], idx: [], rib: [] }, k;
+  var r = clamp(0.15 + Hs * 0.011, 0.16, 0.3) * S.range(0.9, 1.1);
+  var lean = S.range(-0.03, 0.03) * Hs;
+  var trunk = limbPath([0, -0.15, 0], [lean, Hs - r, 0], [lean * 0.2, Hs * 0.5, 0], r, 9);
+  for (k = 0; k < 10; k++) { var t = k / 9; trunk.radii[k] *= (1 + 0.16 * Math.exp(-t * 12)) * (1 + 0.06 * Math.sin(t * 3.14)); }
+  pushTube(B, trunk.path, trunk.radii, 32, { n: 18, amp: 0.05 });
+  var arms = Hs < 3.6 ? 0 : (Hs < 7 ? S.int(1, 2) : S.int(2, 5)), az = S.range(0, 6.283);
+  for (var a = 0; a < arms; a++) {
+    var th = az + a * (6.283 / Math.max(arms, 2)) + S.range(-0.6, 0.6);
+    var y0 = Math.min(S.range(Math.max(2.5, Hs * 0.36), Math.max(2.6, Hs * 0.66)), Hs - 1.4);
+    var reach = S.range(0.35, 0.7), rise = S.range(0.9, Math.max(1.0, Math.min(3.4, Hs - y0 + 0.6)));
+    var ex = Math.cos(th) * reach, ez = Math.sin(th) * reach, ar = r * S.range(0.66, 0.82);
+    var path = [], radii = [];
+    for (k = 0; k <= 5; k++) { var u = k / 5; path.push([ex * 0.15 + ex * 0.85 * Math.sin(u * 1.5708), y0 + reach * 0.45 * (1 - Math.cos(u * 1.5708)), ez * 0.15 + ez * 0.85 * Math.sin(u * 1.5708)]); radii.push(ar); }
+    var up = limbPath([ex, y0 + reach * 0.45, ez], [ex * 1.05, y0 + reach * 0.45 + rise, ez * 1.05], [ex, y0 + reach * 0.45 + rise * 0.5, ez], ar, 5);
+    for (k = 1; k < up.path.length; k++) { path.push(up.path[k]); radii.push(up.radii[k]); }
+    pushTube(B, path, radii, 24, { n: 14, amp: 0.05 });
+  }
+  return finishGeo(B);
+}
 function cactusTemplate(R, kind) {
   var B = { pos: [], nor: [], idx: [], rib: [] };
   var a, th, k;
@@ -5260,6 +5322,8 @@ function buildCacti(scene, P, R, U, H, spec) {
   var buckets = {};
   var guard = 0, placed = 0;
   var lim = scatterLim(P);
+  /* a saguaro's height from its drawn size: young ones about, a few giants */
+  var sagH = function (sz) { return 1.5 + Math.pow(clamp((sz - spec.size[0]) / Math.max(spec.size[1] - spec.size[0], 0.01), 0, 1), 1.25) * 11.5; };
   while (placed < spec.count && guard < spec.count * 60) {
     guard++;
     var a = R.range(-lim, lim);
@@ -5269,12 +5333,19 @@ function buildCacti(scene, P, R, U, H, spec) {
     var kind = R.weighted(pairs);
     var sz = R.range(spec.size[0], spec.size[1]) * ({ saguaro: 1, ocotillo: 0.72, barrel: 0.15, pear: 0.30, agave: 0.28, cholla: 0.30 }[kind] || 0.3);
     (buckets[kind] = buckets[kind] || []).push([x, z, sz, R.range(0.85, 1.15)]);
-    App._shadows.push([x, H(x, z), z, sz * (kind === 'saguaro' ? 0.16 : 0.3), 1.0, sz]);
+    if (kind === 'saguaro') App._shadows.push([x, H(x, z), z, 0.4, 1.0, sagH(sz)]);
+    else App._shadows.push([x, H(x, z), z, sz * 0.3, 1.0, sz]);
     placed++;
   }
+  /* the saguaros' shapes come from a stream of their own; the builder's
+     stream still draws the old templates' numbers, so nothing after moves */
+  var CR = RNG(P.base + '/build/cacti' + (P.nonce ? '/' + P.nonce : ''));
+  var SAG = [2.6, 5.4, 9.6];   /* spear, young, old: template heights */
   for (var kind2 in buckets) {
     var items = buckets[kind2], C = CACTI[kind2];
-    var mat = solidMat(U, C.body, { rib: C.ribs ? 1 : 0, ribN: C.ribs || 16, spineCol: C.spine, spines: C.spines, tipCol: C.tip, tipMix: C.tipMix || 0 });
+    var mat = solidMat(U, C.body, { rib: C.ribs ? 1 : 0, ribN: C.ribs || 16, spineCol: C.spine, spines: C.spines, tipCol: C.tip,
+      /* the ocotillo flowers red at its tips in spring, and only then */
+      tipMix: kind2 === 'ocotillo' && P.seasonKey !== 'spring' ? 0 : (C.tipMix || 0), aoH: 0.3 });
     for (var t = 0; t < 2; t++) {
       var part = items.filter(function (_, idx) { return idx % 2 === t; });
       if (!part.length) continue;
@@ -5282,7 +5353,18 @@ function buildCacti(scene, P, R, U, H, spec) {
       var solids = [];
       for (var i = 0; i < part.length; i++)
         solids.push([part[i][0], H(part[i][0], part[i][1]) - 0.03, part[i][1], part[i][2], R.range(0, 6.283), part[i][3], 1]);
-      instanceSolid(scene, tpl, solids, mat);
+      if (kind2 !== 'saguaro') { instanceSolid(scene, tpl, solids, mat); continue; }
+      tpl.dispose();
+      for (var cl = 0; cl < 3; cl++) {
+        var mine = [];
+        for (i = 0; i < part.length; i++) {
+          var hs = sagH(part[i][2]), c2 = hs < 3.6 ? 0 : (hs < 7 ? 1 : 2);
+          if (c2 !== cl) continue;
+          var sol = solids[i];
+          mine.push([sol[0], sol[1] - 0.1, sol[2], 1, sol[4], hs / SAG[cl], 1]);
+        }
+        if (mine.length) instanceSolid(scene, saguaroTemplate(CR, SAG[cl]), mine, mat);
+      }
     }
   }
 }
@@ -9131,6 +9213,8 @@ function scatterGroups(P, H, spec, grow, lim, S) {
 
 function plantable(P, H, x, z, maxSlope) {
   if (P.waterY != null && H(x, z) < P.waterY + 0.25) return false;
+  /* in an erg, only the hollows between the dunes hold anything */
+  if (P.erg && duneAt(P.dune, x, z) > P.dune.hd * 0.22) return false;
   if (maxSlope && slopeAt(H, x, z) > maxSlope) return false;
   if (P.clearKind && clearAt(P, x, z + 0.6) > 0) return false;
   if (P.pathKind && onPathAt(P, x, z) > 0.55) return false;
