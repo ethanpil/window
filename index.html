@@ -6665,23 +6665,59 @@ function bridgeGeo(P, R, H) {
   for (i = -24; i <= 24; i++) rim = Math.max(rim, H(i / 24 * roadHalf, P.bridgeZ));
   P.bridgeDeck = rim + th * 0.5 + 0.6;
   var kind = P.bridgeKind, drop = P.bridgeDeck - P.waterY;
-  /* the roadway */
+  /* New detail draws from a stream of their own, so the builder's is drawn
+     as before. The road surface and the railings' kerbs are trim (rib 1),
+     tarmac grey; the lines on it are their own white mesh; the approaches
+     stand on earth banks, also their own mesh. */
+  var BR = RNG(P.base + '/build/bridge' + (P.nonce ? '/' + P.nonce : ''));
+  var trims = [], mark = function (fn) { var a0 = B.rib.length; fn(); trims.push(a0, B.rib.length); };
+  var Mk = { pos: [], nor: [], idx: [], rib: [] }, Ek = { pos: [], nor: [], idx: [], rib: [] };
+  /* the roadway, and its tarmac the whole length of the road */
   pushBox(B, 0, 0, 0, span * 0.5, th * 0.5, deckW * 0.5, 0);
-  /* the approach either side, on fill that reaches below the ground so that
-     it meets the land instead of floating over it */
+  mark(function () { pushBox(B, 0, th * 0.5 + 0.04, 0, roadHalf, 0.06, deckW * 0.5 - 0.05, 0); });
+  /* a dashed line down the middle, a solid one along each edge */
+  for (var dx2 = -roadHalf + 2; dx2 < roadHalf - 2; dx2 += 9) pushBox(Mk, dx2 + 1.5, th * 0.5 + 0.105, 0, 1.5, 0.008, 0.07, 0);
+  for (var el = -1; el <= 1; el += 2) pushBox(Mk, 0, th * 0.5 + 0.105, el * (deckW * 0.5 - 1.6), roadHalf, 0.008, 0.07, 0);
+  /* The approach either side, on an earth bank whose sides slope out to the
+     ground (it reaches below the ground so it meets the land instead of
+     floating over it); a concrete abutment where it meets the span. */
   var segs = 22;
   for (i = 0; i < segs; i++) {
     var e0 = span * 0.5 + (roadHalf - span * 0.5) * (i / segs);
     var e1 = span * 0.5 + (roadHalf - span * 0.5) * ((i + 1) / segs);
     for (var sd = -1; sd <= 1; sd += 2) {
       var gy = Math.min(H(sd * e0, P.bridgeZ), H(sd * e1, P.bridgeZ)) - 4.0 - P.bridgeDeck;
-      pushBox(B, sd * (e0 + e1) * 0.5, (th * 0.5 + gy) * 0.5, 0,
-              (e1 - e0) * 0.5 + 0.1, (th * 0.5 - gy) * 0.5, deckW * 0.44, 0);
+      pushBox(B, sd * (e0 + e1) * 0.5, 0, 0, (e1 - e0) * 0.5 + 0.1, th * 0.5, deckW * 0.5, 0);
+      var yT = -th * 0.5, wT = deckW * 0.5, wB = wT + (yT - gy) * 1.3, xa = sd * e0, xb = sd * e1;
+      var ref = [(xa + xb) * 0.5, (yT + gy) * 0.5, 0];
+      for (var zs = -1; zs <= 1; zs += 2)
+        pushFace(Ek, [[xa, yT, zs * wT], [xb, yT, zs * wT], [xb, gy, zs * wB], [xa, gy, zs * wB]], ref);
+      if (i === 0) {
+        pushBox(B, sd * (span * 0.5 + 0.8), (yT + gy) * 0.5, 0, 0.8, (yT - gy) * 0.5, wT + 0.6, 0);
+        pushFace(Ek, [[xa, yT, -wT], [xa, yT, wT], [xa, gy, wB], [xa, gy, -wB]], [xa + sd, (yT + gy) * 0.5, 0]);
+      }
     }
   }
-  /* parapets, the length of the road */
-  pushBox(B, 0, th * 0.5 + 0.5, deckW * 0.5 - 0.3, roadHalf, 0.5, 0.22, 0);
-  pushBox(B, 0, th * 0.5 + 0.5, -deckW * 0.5 + 0.3, roadHalf, 0.5, 0.22, 0);
+  /* Parapets: a stone bridge has walls; the others a kerb, posts and two
+     rails, which reads as railing rather than a wall the length of the road. */
+  for (var ps = -1; ps <= 1; ps += 2) {
+    var pz = ps * (deckW * 0.5 - 0.3);
+    if (P.bridgeKind === 'stone') { pushBox(B, 0, th * 0.5 + 0.5, pz, roadHalf, 0.5, 0.22, 0); continue; }
+    mark(function () { pushBox(B, 0, th * 0.5 + 0.15, pz, roadHalf, 0.15, 0.25, 0); });
+    pushBox(B, 0, th * 0.5 + 1.12, pz, roadHalf, 0.06, 0.07, 0);
+    pushBox(B, 0, th * 0.5 + 0.68, pz, roadHalf, 0.04, 0.05, 0);
+    for (var px2 = -roadHalf; px2 <= roadHalf; px2 += 3) pushBox(B, px2, th * 0.5 + 0.7, pz, 0.06, 0.45, 0.06, 0);
+  }
+  /* Lamp standards every 30 m, staggered from side to side, an arm out over
+     the road; their lamps glow at night (buildBridge). */
+  var lamps = [];
+  for (var lx = -span * 0.5 - 40, ln = 0; lx <= span * 0.5 + 40; lx += 30, ln++) {
+    var lz = (ln % 2 ? 1 : -1) * (deckW * 0.5 - 0.3);
+    pushCyl(B, lx, th * 0.5, lz, 0.13, 0.09, 8.0, 6);
+    pushBox(B, lx, th * 0.5 + 7.9, lz - Math.sign(lz) * 0.9, 0.08, 0.06, 0.9, 0);
+    lamps.push([lx, th * 0.5 + 7.75, lz - Math.sign(lz) * 1.7]);
+  }
+  P.bridgeLamps = lamps;
   /* the ground under the bridge line, in the deck's own frame */
   var gAt = function (x) { return H(x, P.bridgeZ) - P.bridgeDeck; };
   /* a straight member from (x0,y0) to (x1,y1) at z: a box laid along it */
@@ -6779,8 +6815,8 @@ function bridgeGeo(P, R, H) {
     }
     pushBox(B, -span * 0.5, (spring - drop) * 0.5, 0, aw * 0.16, (spring + drop) * 0.5, deckW * 0.48, 0);
     pushBox(B, span * 0.5, (spring - drop) * 0.5, 0, aw * 0.16, (spring + drop) * 0.5, deckW * 0.48, 0);
-  } else { /* girder: a plate truss each side of the deck, piers to the floor */
-    var gTop = -0.85, gBot = -2.75, gH = (gTop - gBot) * 0.5, gMid = (gTop + gBot) * 0.5;
+  } else { /* girder: a truss each side of the deck, piers to the floor */
+    var gTop = -th * 0.5, gBot = -th * 0.5 - BR.range(3, 5), gH = (gTop - gBot) * 0.5, gMid = (gTop + gBot) * 0.5;
     var bay = span * 0.96 / 24;
     for (var gs = -1; gs <= 1; gs += 2) {
       var gz = gs * deckW * 0.40;
@@ -6801,18 +6837,47 @@ function bridgeGeo(P, R, H) {
     var piers = R.int(2, 4);
     for (i = 0; i < piers; i++) {
       var qx = (i / (piers - 1) - 0.5) * span * 0.72;
-      pushBox(B, qx, -drop * 0.5 - 2.75, 0, 1.5, drop * 0.5, deckW * 0.34, 0);
+      pushBox(B, qx, (gBot - drop) * 0.5, 0, 1.5, (gBot + drop) * 0.5, deckW * 0.34, 0);
+    }
+  }
+  /* A suspension or arch deck is stiffened by a truss along each edge, three
+     metres deep: a slab a metre thick spanning two hundred read as paper. */
+  if (kind === 'suspension' || kind === 'arch') {
+    var tD = BR.range(2.6, 3.4), tTop = -th * 0.5, tBot = tTop - tD, tMid = (tTop + tBot) * 0.5, nb2 = Math.round(span / tD);
+    var bay2 = span / nb2;
+    for (var ts = -1; ts <= 1; ts += 2) {
+      var tz = ts * (deckW * 0.5 - 0.4);
+      pushBox(B, 0, tBot, tz, span * 0.5, 0.2, 0.25, 0);
+      for (i = 0; i <= nb2; i++) {
+        var tx2 = -span * 0.5 + i * bay2;
+        pushBox(B, tx2, tMid, tz, 0.13, tD * 0.5, 0.18, 0);
+        if (i < nb2) pushBox(B, tx2 + bay2 * 0.5, tMid, tz, 0.11, Math.sqrt(bay2 * bay2 + tD * tD) * 0.5, 0.15, 0, Math.atan2(bay2, tD) * (i % 2 ? 1 : -1));
+      }
     }
   }
   P.bridgeSpan = span; P.bridgeW = deckW; P.bridgeTh = th; P.bridgeRoad = roadHalf * 2;
+  for (i = 0; i < B.rib.length; i++) B.rib[i] = 0;
+  for (i = 0; i < trims.length; i += 2) for (var t2 = trims[i]; t2 < trims[i + 1]; t2++) B.rib[t2] = 1;
+  P.bridgeLines = finishGeo(Mk); P.bridgeBank = finishGeo(Ek);
   return finishGeo(B);
 }
 function buildBridge(scene, P, R, U, H) {
   var col = { suspension: '#9aa2a6', arch: '#8e9498', girder: '#6f5a4a', stone: '#a3968a' }[P.bridgeKind];
   /* no foot to darken: the bridge's origin is its deck, not the ground */
-  var mat = solidMat(U, col, { rib: 0, grain: 0, spines: 0, body2: '#6d6a66', aoH: 0 });
+  var mat = solidMat(U, col, { rib: 0, grain: 0, spines: 0, body2: '#36373a', twoTone: 1, aoH: 0 });
   var geo = bridgeGeo(P, R, H);
-  instanceSolid(scene, geo, [[0, P.bridgeDeck, P.bridgeZ, 1, 0, 1, 1]], mat);
+  var at = [[0, P.bridgeDeck, P.bridgeZ, 1, 0, 1, 1]];
+  instanceSolid(scene, geo, at, mat);
+  instanceSolid(scene, P.bridgeLines, at, solidMat(U, '#d9d7d0', { rib: 0, grain: 0, spines: 0, aoH: 0 }));
+  /* the banks are earth grown over with grass */
+  var bank = new THREE.Color(P.grass.base).lerp(new THREE.Color(P.grass.soil), 0.35);
+  instanceSolid(scene, P.bridgeBank, at, solidMat(U, '#' + bank.getHexString(), { rib: 0, grain: 0, spines: 0, aoH: 0 }));
+  var glows = [];
+  for (var li = 0; li < P.bridgeLamps.length; li++) {
+    var lp = P.bridgeLamps[li];
+    glows.push([lp[0], P.bridgeDeck + lp[1], P.bridgeZ + lp[2], 1.1, 1.6, 1.3, 0.9, 0]);
+  }
+  buildGlows(scene, U, glows);
   App._shadows.push([0, P.bridgeDeck, P.bridgeZ, P.bridgeSpan * 0.22, 0.75, 2]);
   buildTraffic(scene, P, R, U, {
     x: 0, y: P.bridgeDeck + P.bridgeTh * 0.5, z: P.bridgeZ, len: P.bridgeRoad, dir: [1, 0],
