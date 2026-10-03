@@ -7304,6 +7304,31 @@ var SCATTER = {
   brittlebush: { n: [2, 8], sigma: [1.5, 4], wet: 0, maxSlope: 0.4 },
   creosote:  { space: 2.6, maxSlope: 0.4 }
 };
+/* The edge of a wood seen across the fields: not a row of identical trees
+   on an arc with sky between them, but trees bunched along a wandering line
+   a few deep, and behind and between them more crowns sunk to their
+   shoulders, a dark band of wood that closes the gaps. Items carry a fourth
+   number, how far the card is sunk as a share of its size. */
+function treelineItems(P, H, spec, lim, lineR, S) {
+  var items = [], n = Math.round(spec.count * S.range(5, 7)), seed = S.int(1, 99999);
+  var bend = S.range(0.08, 0.22);
+  for (var i = 0, guard = 0; i < n && guard < n * 4; guard++) {
+    var a = S.range(-lim, lim);
+    /* clumps and the odd gap: density follows a noise along the line */
+    var dens = fbm2(a * 4.0, 1.3, seed, 2);
+    if (S.f() > 0.55 + dens * 0.9) continue;
+    var rr = lineR * (1 + fbm2(a * 2.2, 5.1, seed + 7, 2) * bend * 2) + S.gauss() * 9;
+    var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
+    if (!plantable(P, H, x, z, 0)) continue;
+    var band = S.f() < 0.4;
+    /* the band stands a little behind the front trees */
+    if (band) { x *= 1.04; z *= 1.04; }
+    items.push([x, z, S.range(spec.size[0], spec.size[1]) * (band ? 1.15 : 1), band ? S.range(0.30, 0.45) : 0]);
+    i++;
+  }
+  return items;
+}
+
 function scatterGroups(P, H, spec, grow, lim, S) {
   var items = [], guard = 0, r0 = spec.r[0], r1 = spec.r[1];
   var fits = function (x, z, sz, gap) {
@@ -7433,7 +7458,10 @@ function buildProps(scene, P, R, U, H) {
     var guard = 0;
     var lineR = spec.line ? R.range(spec.r[0], spec.r[1]) : 0;
     var grow = SCATTER[spec.kind];
-    if (spec.line || spec.rows || !grow) {
+    if (spec.line) {
+      items = treelineItems(P, H, spec, lim, lineR,
+        RNG(P.base + '/build/treeline' + (P.nonce ? '/' + P.nonce : '')));
+    } else if (spec.rows || !grow) {
       while (items.length < spec.count && guard < spec.count * 60) {
         guard++;
         var a = R.range(-lim, lim);
@@ -7481,7 +7509,7 @@ function buildProps(scene, P, R, U, H) {
       iPos[i * 3] = items[i][0];
       /* on a slope the card's downhill corner would stand on air: sink it by
          the drop across its own half-width */
-      iPos[i * 3 + 1] = H(items[i][0], items[i][1]) - items[i][2] * (spec.line ? 0.09 : 0.03) + (spec.lift || 0) * items[i][2]
+      iPos[i * 3 + 1] = H(items[i][0], items[i][1]) - items[i][2] * ((spec.line ? 0.09 : 0.03) + (items[i][3] || 0)) + (spec.lift || 0) * items[i][2]
         - slopeAt(H, items[i][0], items[i][1]) * items[i][2] * spriteAspect(spec.kind) * 0.5;
       iPos[i * 3 + 2] = items[i][1];
       iAttr[i * 2] = items[i][2];
@@ -7514,6 +7542,7 @@ function buildProps(scene, P, R, U, H) {
       });
     if (nearItems.length) buildNearTrees(scene, P, R, U, H, spec.kind, nearItems, spec);
     for (var si2 = 0; si2 < items.length; si2++) {
+      if (items[si2][3]) continue;                /* a sunk crown in the wood band */
       App._shadows.push([items[si2][0], H(items[si2][0], items[si2][1]), items[si2][1],
                          items[si2][2] * (spec.kind === 'rock' ? 0.55 : 0.34),
                          spec.kind === 'rock' ? 0.8 : 1.0, items[si2][2] * (spec.kind === 'rock' ? 0.6 : 0.85)]);
