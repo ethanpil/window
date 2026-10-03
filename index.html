@@ -1271,7 +1271,17 @@ function buildParams(seedStr, nonce) {
     if (P.mesaH > 24) P.rockFrac = mesaRock;
   }
   if (TK === 'fjord') { P.snowFrac = LR.range(0.52, 0.76); P.rockFrac = LR.range(0.2, 0.34); }
-  P.rockCol = { meadow: '#6b675f', coast: '#8b8477', desert: '#9b6b47', alpine: '#6e6b66', fjord: '#5a5c5e' }[P.biomeKey];
+  /* every landscape needs its own stone: an unknown key used to give
+     new THREE.Color(undefined), which is white, and steep ground went chalk */
+  P.rockCol = {
+    meadow: '#6b675f', coast: '#8b8477', desert: '#9b6b47', alpine: '#6e6b66', fjord: '#5a5c5e',
+    savanna: '#7c6a55', lavender: '#8a8272', penthouse: '#6e6a64', bridge: '#66635d',
+    hayfield: '#757064', cascade: '#5e605c', canyon: '#8a4c30', oasis: '#a3805a',
+    lakefront: '#6a6862', river: '#6b675f', flowerfield: '#6f6a60', marsh: '#57544b',
+    cliffcoast: '#6d6c68', terraces: '#6a6253', orchard: '#8c8371', autumn: '#625c52',
+    moor: '#55504a', tundra: '#5c5b57', saltflat: '#b8b2a5', bamboo: '#5e5a50',
+    blossom: '#6b675f', farmland: '#6d675c', urban: '#6b6862'
+  }[P.biomeKey] || ('#' + new THREE.Color(P.grass.soil).multiplyScalar(0.8).getHexString());
   P.highCol = P.biomeKey === 'desert' ? '#c8a074' : '#eef2f7';
 
   /* flowers */
