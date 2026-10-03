@@ -3445,7 +3445,8 @@ function buildTerrain(scene, P, R, U, H) {
        block], [street, pavement, ring start, ring end] */
     uCityOn: { value: CP ? 1.0 : 0.0 },
     uCity: { value: new THREE.Vector4(CP ? CP.ca : 1, CP ? CP.sa : 0, CP ? CP.pitch : 1, CP ? CP.bw : 1) },
-    uCity2: { value: new THREE.Vector4(CP ? CP.sw : 1, CP ? CP.sk : 1, CP ? CP.start : 0, CP ? CP.end : 0) },
+    uCity2: { value: new THREE.Vector4(CP ? CP.sw : 1, CP ? CP.sk : 1, CP ? CP.streetStart : 0, CP ? CP.end : 0) },
+    uCityBuilt: { value: CP ? CP.start : 0 },
     uCityPark: { value: new THREE.Color(P.grass.cb || P.grass.base) },
     uNight: App.skyU.uNight,
     /* the kept ground under the window: depth, edge wobble, edge softness, kind */
@@ -3483,7 +3484,7 @@ function buildTerrain(scene, P, R, U, H) {
       'uniform float uPathW, uPathX, uPathZ, uPathBend, uPathPh, uPathBend2, uPathK2, uPathPh2, uPathGauge;',
       'uniform vec2 uPathDir; uniform vec3 uPathCol; uniform vec4 uClear;',
       'uniform vec2 uWindDir; uniform float uWind, uFlwK; uniform vec3 uFlw0, uFlw1, uFlw2;',
-      'uniform float uCityOn, uNight; uniform vec4 uCity, uCity2; uniform vec3 uCityPark;',
+      'uniform float uCityOn, uNight, uCityBuilt; uniform vec4 uCity, uCity2; uniform vec3 uCityPark;',
       /* Painted lines and paving joints, box-filtered over the pixel's own
          footprint f: exact coverage near, their average far, never moire.
          sqAA: a dash pattern of period T, duty D. bandAA: the band lo..hi. */
@@ -3491,7 +3492,7 @@ function buildTerrain(scene, P, R, U, H) {
       'float sqAA(float x, float T, float D, float f){ f = max(f, 1e-3); return (sqI(x + 0.5 * f, T, D) - sqI(x - 0.5 * f, T, D)) / f; }',
       'float bandAA(float d, float lo, float hi, float f){ f = max(f, 1e-3); return max(0.0, min(d + 0.5 * f, hi) - max(d - 0.5 * f, lo)) / f; }',
       /* is the block centred here part of the city (its streets are drawn)? */
-      'float cityBlk(vec2 b){ float d = length(b * uCity.z); return step(uCity2.z - uCity.z * 0.6, d) * step(d, uCity2.w); }',
+      'float cityBlk(vec2 b){ float d = length(b * uCity.z); return step(uCity2.z, d) * step(d, uCity2.w); }',
       /* the same edge as clearAt() in the script */
       'float clearAmt(vec3 w){',
       '  float edge = -uClear.x + uClear.y * (sin(w.x * 0.31 + 0.7) + 0.6 * sin(w.x * 0.83 + 2.1));',
@@ -3657,7 +3658,7 @@ function buildTerrain(scene, P, R, U, H) {
       '    cc = mix(cc, vec3(0.58, 0.57, 0.54) * (0.85 + 0.2 * agg), bandAA(ac, sk - 0.18, sk, fq));',
       /* the ring of blocks just short of the city keeps its own ground
          inside the kerb: a park or a garden with a street round it */
-      '    float inB = clamp(-ac / fq + 0.5, 0.0, 1.0), built = step(uCity2.z, length(blk * uCity.z));',
+      '    float inB = clamp(-ac / fq + 0.5, 0.0, 1.0), built = step(uCityBuilt, length(blk * uCity.z));',
       '    cc = mix(cc, plaza, inB);',
       '    c = mix(c, cc, zone * (1.0 - inB * (1.0 - built)));',
       /* lamps every 26 m down each pavement, staggered across the street */
@@ -4987,6 +4988,9 @@ function cityPlan(P) {
   var bw = pent ? P.blockW : ubw, sw = pent ? P.streetW : usw, ga = pent ? P.gridAngle : uga;
   var C = { pent: pent, bw: bw, sw: sw, pitch: bw + sw, ga: ga, ca: Math.cos(ga), sa: Math.sin(ga),
             sk: clamp(sw * 0.2, 3, 5), start: pent ? 0 : ustart, end: pent ? 1600 : ustart + udepth };
+  /* streets reach out past the city proper: a ring road round the park, or
+     two rings of suburban streets lined with houses */
+  C.streetStart = pent ? -1e4 : C.start - C.pitch * (P.cityFront === 'houses' ? 2.6 : 0.6);
   /* grid frame <-> world */
   C.toWorld = function (gx, gz) { return [gx * C.ca - gz * C.sa, gx * C.sa + gz * C.ca]; };
   C.toGrid = function (x, z) { return [x * C.ca + z * C.sa, -x * C.sa + z * C.ca]; };
@@ -5114,39 +5118,106 @@ function cityBuilding(C, R, lt, y, hgt, out, roofs) {
   return crown;
 }
 
+/* Houses at their real size: two storeys, eaves at five and a half metres,
+   the ridge at eight to ten. Four kinds: a gabled house, a hipped one, an L
+   with a wing to the back, a short terrace of three. Built in metres, front
+   (an eaves side) toward +z; roofs and chimneys are trim (rib 1) for the
+   two-tone roof colour. */
+function houseTemplates() {
+  var mk = function (fn) {
+    var B = { pos: [], nor: [], idx: [], rib: [] }, trims = [];
+    fn(B, function (f) { var a = B.rib.length; f(); trims.push([a, B.rib.length]); });
+    for (var t = 0; t < trims.length; t++) for (var k = trims[t][0]; k < trims[t][1]; k++) B.rib[k] = 1;
+    return finishGeo(B);
+  };
+  return [
+    { w: 10, d: 8, top: 9.0, g: mk(function (B, roof) {
+      pushBox(B, 0, 2.7, 0, 5, 2.7, 4, 0);
+      pushGableEnds(B, 0, 5.4, 0, 5, 4.45, 3.6);
+      roof(function () { pushGableRoof(B, 0, 5.4, 0, 5, 4, 3.6, 0.45); pushBox(B, 2.6, 8.3, -1.0, 0.35, 1.1, 0.5, 0); });
+    }) },
+    { w: 11, d: 9, top: 8.6, g: mk(function (B, roof) {
+      pushBox(B, 0, 2.8, 0, 5.5, 2.8, 4.5, 0);
+      roof(function () { pushHipRoof(B, 0, 5.6, 0, 5.5, 4.5, 3.0, 0.5); pushBox(B, -2.2, 7.9, 0.8, 0.35, 1.0, 0.5, 0); });
+    }) },
+    { w: 10, d: 13.5, top: 8.8, g: mk(function (B, roof) {
+      pushBox(B, 0, 2.7, 2.75, 5, 2.7, 3.75, 0);
+      pushGableEnds(B, 0, 5.4, 2.75, 5, 4.15, 3.4);
+      pushBox(B, -2, 2.7, -3.5, 3, 2.7, 3.2, 0);
+      roof(function () {
+        pushGableRoof(B, 0, 5.4, 2.75, 5, 3.75, 3.4, 0.4);
+        pushHipRoof(B, -2, 5.4, -3.5, 3, 3.2, 2.6, 0.4);
+      });
+    }) },
+    { w: 19.5, d: 9, top: 9.4, g: mk(function (B, roof) {
+      pushBox(B, 0, 3.0, 0, 9.75, 3.0, 4.5, 0);
+      pushGableEnds(B, 0, 6.0, 0, 9.75, 4.85, 3.4);
+      roof(function () {
+        pushGableRoof(B, 0, 6.0, 0, 9.75, 4.5, 3.4, 0.35);
+        pushBox(B, -3.25, 9.0, 0, 0.5, 0.9, 0.35, 0); pushBox(B, 3.25, 9.0, 0, 0.5, 0.9, 0.35, 0);
+      });
+    }) }
+  ];
+}
+
+/* The neighbourhood in front of the city: houses on the blocks short of it,
+   set back five to eight metres from the pavement and facing the street,
+   with gardens behind. */
+function buildCityHouses(scene, P, U, H, C) {
+  var HR = RNG(P.base + '/build/houses' + (P.nonce ? '/' + P.nonce : ''));
+  var T = houseTemplates();
+  var roofCol = HR.pick(['#3d3d42', '#55392e', '#4a4643', '#5b4033']);
+  /* three finishes: render, brick, painted boards */
+  var mats = [
+    solidMat(U, HR.pick(['#d6cbb8', '#cbbfa8', '#e0d8c8', '#c9c2b4']), { rib: 0, grain: 0, spines: 0, twoTone: 1, body2: roofCol, aoH: 0.4, facade: { kind: 2, win: 0.85, bay: 2.6, roof: 0, doorW: 1.0, doorH: 2.1 } }),
+    solidMat(U, HR.pick(['#8f5a44', '#7d4c3a', '#9a6a52']), { rib: 0, grain: 0, spines: 0, twoTone: 1, body2: roofCol, aoH: 0.4, facade: { kind: 4, win: 0.85, bay: 2.6, roof: 0, doorW: 1.0, doorH: 2.1 } }),
+    solidMat(U, HR.pick(['#b7c0bf', '#c9c3b2', '#a9b4ae']), { rib: 0, grain: 0, spines: 0, twoTone: 1, body2: roofCol, aoH: 0.4, facade: { kind: 0, win: 0.8, bay: 2.4, roof: 0, doorW: 1.0, doorH: 2.1 } })
+  ];
+  var groups = {};
+  var sides = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  var nb = Math.ceil(C.start / C.pitch) + 1, lim = visibleHalfAngle(P) * 1.25;
+  for (var bx = -nb; bx <= nb; bx++) for (var bz = -nb; bz <= 0; bz++) {
+    var gx = bx * C.pitch, gz = bz * C.pitch, w0 = C.toWorld(gx, gz), d0 = Math.sqrt(w0[0] * w0[0] + w0[1] * w0[1]);
+    if (d0 < C.streetStart || d0 >= C.start || Math.abs(Math.atan2(w0[0], -w0[1])) > lim) continue;
+    var L = Math.max(C.bw * 0.5 - 14, 6);
+    for (var si = 0; si < 4; si++) {
+      var n = sides[si], t = [-n[1], n[0]];
+      var a = -L;
+      while (true) {
+        var ti = HR.int(0, 3), tp = T[ti], sb = HR.range(5, 8);
+        if (a + tp.w > L) break;
+        var ac = a + tp.w * 0.5, inn = C.bw * 0.5 - sb - tp.d * 0.5;
+        var cx = gx + n[0] * inn + t[0] * ac, cz = gz + n[1] * inn + t[1] * ac;
+        a += tp.w + HR.range(3, 7);
+        var w = C.toWorld(cx, cz), rot = Math.atan2(-n[0], n[1]) + C.ga;
+        var c = Math.cos(rot), s = Math.sin(rot), lo = 1e9, wet = false;
+        for (var q = 0; q < 4; q++) {
+          var lx = (q & 1 ? 0.5 : -0.5) * tp.w, lz = (q & 2 ? 0.5 : -0.5) * tp.d;
+          var y = H(w[0] + lx * c - lz * s, w[1] + lx * s + lz * c);
+          if (P.waterY != null && y < P.waterY + 0.8) wet = true;
+          lo = Math.min(lo, y);
+        }
+        if (wet) continue;
+        var mi = HR.int(0, 2), key = ti + '_' + mi;
+        (groups[key] = groups[key] || []).push([w[0], lo - 0.3, w[1], 1, rot, 1, 1]);
+        App._boxes.push([w[0], w[1], tp.w * 0.5, tp.d * 0.5, rot, lo + tp.top * 0.8]);
+      }
+    }
+  }
+  for (var k in groups) {
+    var parts = k.split('_');
+    instanceSolid(scene, T[+parts[0]].g, groups[k], mats[+parts[1]]);
+  }
+}
+
 /* ---------- a city ----------
    The skyline seen from outside it: blocks on the grid inside the city's
    ring, each filled by cityBlock, drawn by cityMesh with a window grid
    computed per face. At night the lit windows carry the whole scene. */
 function buildCity(scene, P, R, U, H) {
-  /* the near neighbourhood: low roofs and gardens before the city proper */
-  if (P.cityFront === 'houses') {
-    var hb = { pos: [], nor: [], idx: [], rib: [] };
-    pushBox(hb, 0, 0.5, 0, 0.5, 0.5, 0.38, 0);
-    pushGableEnds(hb, 0, 1.0, 0, 0.5, 0.38 + 0.06, 0.42 * 1.1);
-    pushGableRoof(hb, 0, 1.0, 0, 0.5, 0.38, 0.42 * 1.1, 0.06);
-    pushBox(hb, -0.28, 1.32, 0.10, 0.07, 0.22, 0.07, 0);
-    var htpl = finishGeo(hb);
-    var hmat = solidMat(U, R.pick(['#c9b7a2', '#b8a894', '#cbbfae', '#a9917c']), { rib: 0, grain: 0, spines: 0, body2: '#7a5c48' });
-    var houses = [], hg = 0;
-    while (houses.length < R.int(26, 52) && hg < 900) {
-      hg++;
-      var ha = R.range(-1.15, 1.15), hr = 60 + Math.pow(R.f(), 0.9) * 150;
-      var hx = Math.sin(ha) * hr, hz = -Math.cos(ha) * hr;
-      if (!plantable(P, H, hx, hz)) continue;
-      var hs = R.range(4.5, 8), hrot = R.range(0, 6.283), hsy = R.range(0.8, 1.15), hsz = R.range(0.85, 1.2);
-      /* level on the lowest corner, so the downhill side does not stand on air */
-      var hlo = H(hx, hz), hcr = Math.cos(hrot), hsr = Math.sin(hrot);
-      for (var hq = 0; hq < 4; hq++) {
-        var hlx = (hq & 1 ? 0.5 : -0.5) * hs, hlz = (hq & 2 ? 0.38 : -0.38) * hs * hsz;
-        hlo = Math.min(hlo, H(hx + hlx * hcr - hlz * hsr, hz + hlx * hsr + hlz * hcr));
-      }
-      houses.push([hx, hlo - 0.2, hz, hs, hrot, hsy, hsz]);
-      App._shadows.push([hx, H(hx, hz), hz, hs * 0.45, 0.8, hs]);
-    }
-    if (houses.length) instanceSolid(scene, htpl, houses, hmat);
-  }
   var C = cityPlan(P);
+  /* the near neighbourhood: houses and gardens before the city proper */
+  if (P.cityFront === 'houses') buildCityHouses(scene, P, U, H, C);
   /* how wide across the view the city runs: no wider than can be seen, or
      most of it stands behind the wall */
   var spread = Math.min(R.range(0.9, 1.25), visibleHalfAngle(P) * 1.2);
@@ -5177,7 +5248,7 @@ function buildCity(scene, P, R, U, H) {
   cityMesh(scene, P, R, U, items);
   buildRoofs(scene, P, R, U, roofs);
   /* street lamps through the city, and red lights on its tall roofs */
-  cityStreets(scene, P, R, U, H, C, { reach: C.end, treeReach: 0, trees: 0, beacons: cityBeacons(items) });
+  cityStreets(scene, P, R, U, H, C, { reach: C.end, treeReach: C.start, trees: 0.7, beacons: cityBeacons(items) });
 }
 
 /* Red obstacle lights on the corners of every roof over 90 m. */
@@ -6945,7 +7016,7 @@ function cityStreets(scene, P, R, U, H, C, opt) {
   var inRing = function (gx, gz) {
     /* a street is drawn where either block beside it is in the city */
     var w = C.toWorld(gx, gz), d = near(w[0], w[1]);
-    return d >= C.start - C.pitch * 0.6 && d <= C.end;
+    return d >= C.streetStart && d <= C.end;
   };
   var y = function (x, z) { return opt.flat != null ? opt.flat : H(x, z); };
   /* lamps: the same places as the ground's pools (see buildTerrain) */
@@ -7004,8 +7075,10 @@ function cityStreets(scene, P, R, U, H, C, opt) {
     crown.setAttribute('rib', new THREE.Float32BufferAttribute(new Float32Array(crown.attributes.position.count), 1));
     var leaf = new THREE.Color(P.seasonKey === 'autumn' ? '#8a6230' : (P.seasonKey === 'spring' ? '#4f6d34' : '#3f5a2e'));
     var bare = P.seasonKey === 'winter';
+    if (bare) leaf.set('#4b4038');
     instanceSolid(scene, trunk, trees, solidMat(U, '#4a3f35', { rib: 0, grain: 0, spines: 0, aoH: 0.4 }));
-    if (!bare) instanceSolid(scene, crown, trees, solidMat(U, '#' + leaf.getHexString(), { rib: 0, grain: 3, spines: 0, aoH: 0, body2: '#' + leaf.clone().multiplyScalar(1.35).getHexString() }));
+    /* in winter the crown is bare twigs: the same mass, brown and thin */
+    instanceSolid(scene, crown, trees, solidMat(U, '#' + leaf.getHexString(), { rib: 0, grain: 3, spines: 0, aoH: 0, body2: '#' + leaf.clone().multiplyScalar(bare ? 1.15 : 1.35).getHexString() }));
     for (var ti2 = 0; ti2 < trees.length; ti2 += 1)
       App._shadows.push([trees[ti2][0], trees[ti2][1], trees[ti2][2], 2.4 * trees[ti2][3], bare ? 0.35 : 0.85, 6.5 * trees[ti2][3] * trees[ti2][5]]);
   }
