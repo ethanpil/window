@@ -2254,6 +2254,7 @@ var GLSL_COMMON = [
      pinker, away from it when the sun is low. Land and sky both read it here,
      so the far ground still meets the sky without a seam all the way round. */
   'uniform vec3 uFogAway, uInScat, uGroundCol;',
+  'uniform float uWet;',             /* 0 dry, 1 just rained */
   'vec3 horizonAt(vec3 dir, vec3 fogCol, vec3 sunDir){',
   '  float w = dot(normalize(dir.xz + vec2(1e-5)), normalize(sunDir.xz + vec2(1e-5))) * 0.5 + 0.5;',
   '  return mix(uFogAway, fogCol, smoothstep(0.0, 1.0, w)); }',
@@ -2388,7 +2389,7 @@ function shareCommon(scene) {
   var U = App.U, S = App.skyU;
   var common = {
     uFogShape: U.uFogShape, uFogH: U.uFogH, uFogAway: U.uFogAway, uInScat: U.uInScat,
-    uGroundCol: U.uGroundCol, uHazeK: U.uHazeK,
+    uGroundCol: U.uGroundCol, uHazeK: U.uHazeK, uWet: U.uWet,
     uSkyCloud: S.uCloudTex, uSkyScale: S.uScale, uSkyCover: S.uCover, uSkySoft: S.uSoft,
     uSkyOp: S.uCloudOp, uSkyOff: S.uOff1, uSkyOff2: S.uOff2, uCloudShift: U.uCloudShift
   };
@@ -2455,6 +2456,7 @@ function buildWorld(seed) {
     uInScat:    { value: new THREE.Color(0xa8c0dc) },
     uGroundCol: { value: new THREE.Color(0x303428) },
     uCloudShift: { value: new THREE.Vector2() },
+    uWet:       { value: 0 },
     uShadowMap: { value: (function () {
       var t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
       t.needsUpdate = true; return t;
@@ -3137,7 +3139,9 @@ function buildTerrain(scene, P, R, U, H) {
     uRockLine: { value: P.rockLine != null ? P.rockLine : 1e6 },
     uSnowLine: { value: P.snowLine != null ? P.snowLine : 1e6 },
     uWaterY: { value: P.waterY != null ? P.waterY : -1e6 },
-    uWet: { value: (P.terrainKind || P.biome.terrain) === 'beach' ? 1.0 : 0.0 },
+    uBeach: { value: (P.terrainKind || P.biome.terrain) === 'beach' ? 1.0 : 0.0 },
+    /* rain soaks into sand; puddles stand on soil and paths */
+    uPuddle: { value: ((P.terrainKind || P.biome.terrain) === 'beach' || ARID[P.biomeKey]) ? 0.0 : 1.0 },
     uPaddy: { value: (P.terrainKind || P.biome.terrain) === 'terrace' ? 1.0 : 0.0 },
     /* the planted rows carry on past the last plant, drawn into the ground on
        the same spacing and angle, so they run to the horizon */
@@ -3178,7 +3182,7 @@ function buildTerrain(scene, P, R, U, H) {
       GLSL_TONE,
       'uniform sampler2D uTex; uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uSnowCol, uTip;',
       'uniform vec3 uRock, uHigh, uCoverCol; uniform float uCoverK, uCoverMinY;',
-      'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uWet, uPaddy, uRowSp;',
+      'uniform float uTime, uShadow, uSnow, uRockLine, uSnowLine, uWaterY, uBeach, uPaddy, uRowSp, uPuddle;',
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uStrataLo, uStrataHi;',
       'uniform float uPathW, uPathX, uPathBend, uPathPh, uPathGauge; uniform vec3 uPathCol;',
@@ -3264,16 +3268,27 @@ function buildTerrain(scene, P, R, U, H) {
       '          smoothstep(uRockLine, uRockLine + 22.0, vW.y) * (0.35 + 0.65 * smoothstep(0.12, 0.5, slope)));',
       '  c = mix(c, uRock * 0.92, smoothstep(0.45, 0.78, slope) * 0.75);',
       '  c = mix(c, uHigh, smoothstep(uSnowLine, uSnowLine + 34.0, vW.y) * (1.0 - smoothstep(0.30, 0.62, slope)));',
-      '  c = mix(c, c * 0.60, smoothstep(uWaterY + 1.1, uWaterY + 0.05, vW.y) * uWet);',
+      '  c = mix(c, c * 0.60, smoothstep(uWaterY + 1.1, uWaterY + 0.05, vW.y) * uBeach);',
+      /* After rain the ground darkens (water fills the pores) and takes a sheen
+         of sky at a glancing angle; level ground holds puddles. The mirror is
+         the sky only, on the geometric normal, not the bumped one, which
+         would sparkle. The puddle mask reuses the snow-lie noise fetch. */
+      '  float lieN = texture2D(uTex, vW.xz * 0.011 + vec2(0.5)).r;',
+      '  float pud = uWet * uPuddle * smoothstep(0.975, 0.995, vN.y) * smoothstep(0.60, 0.66, lieN);',
+      '  c *= 1.0 - uWet * 0.32 - pud * 0.25;',
       '  vec2 bk = bakedRG(vW.xz);',
       '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vW.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       '  float diff = max(dot(N2, normalize(uSunDir)), 0.0);',
       '  vec3 light = bk.y * hemi(N2, uAmbCol * 1.15) + uSunCol * diff * 1.25 * sh;',
       '  vec3 lit = c * light;',
+      '  vec3 Vw = normalize(uCamPos - vW), Rw = reflect(-Vw, vN);',
+      '  vec3 skyR = mix(horizonAt(Rw, uFogCol, uSunDir), uZenith, smoothstep(0.0, 0.6, Rw.y));',
+      '  float Fw = 0.02 + 0.98 * pow(1.0 - max(dot(vN, Vw), 0.0), 5.0);',
+      '  lit = mix(lit, skyR, uWet * mix(Fw * 0.5, 0.7, pud));',
       '  float up = smoothstep(0.55, 0.95, vN.y);',
       /* a thin fall lies in the hollows first; a deep one covers everything */
       '  float want = uSnow * (0.35 + 0.65 * up);',
-      '  float lie = texture2D(uTex, vW.xz * 0.011 + vec2(0.5)).r * 0.6 + texture2D(uTex, vW.xz * 0.09).r * 0.25;',
+      '  float lie = lieN * 0.6 + texture2D(uTex, vW.xz * 0.09).r * 0.25;',
       '  float laid = smoothstep(0.42, 0.62, lie + want * 1.25 - 0.55);',
       /* hollows go a little blue, the crust has a fine grain, drifts read in the light.
          Lit like everything else (scaled so a clear midday matches the old flat
@@ -3571,7 +3586,7 @@ function buildGrass(scene, P, R, U, H) {
       '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
       '  vec3 col = mix(uBase, uTip, clamp(yN * 1.05, 0.0, 1.0));',
       '  col = mix(col, uDry, smoothstep(0.55, 1.0, iAttr.w) * 0.45);',
-      '  col *= 0.78 + 0.44 * iAttr.w;',
+      '  col *= (0.78 + 0.44 * iAttr.w) * (1.0 - 0.18 * uWet);',
       '  vec3 lit = col * (bk.y * hemi(N, uAmbCol * 1.15) + uSunCol * (diff * 1.15 + trans + sheen) * sh) * ao;',
       /* one steady colour for the far field: no per-blade variation left to alias */
       '  vec3 mass = mix(uBase, uTip, 0.62) * (uAmbCol * 1.15 + uSunCol * 0.70 * sh) * 0.94;',
@@ -3972,6 +3987,7 @@ function solidMat(U, colour, opts) {
          ground's bounce below: a shaded side is lit cool from the sky, an
          underside dimly by the ground, and no sun reaches round the back. */
       '  vCol = uBody * (hemi(n, uAmbCol * 1.1) * ao * mix(1.0, bk.y, 0.6) + uSunCol * diff * 1.15 * sh);',
+      '  vCol *= 1.0 - 0.25 * uWet;',
       '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  float fH = fogAmtH(-mv.z, uFogDensity, wp.y);',
@@ -4336,7 +4352,7 @@ function cityMesh(scene, P, R, U, items) {
       '  float diff = max(dot(vN, sd), 0.0);',
       '  vec2 bk = bakedRG(vW.xz);',
       '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(vW.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-      '  vec3 c = uWall * (hemi(vN, uAmbCol * 1.15) * mix(1.0, bk.y, 0.5) + uSunCol * diff * 1.05 * sh);',
+      '  vec3 c = uWall * (hemi(vN, uAmbCol * 1.15) * mix(1.0, bk.y, 0.5) + uSunCol * diff * 1.05 * sh) * (1.0 - 0.22 * uWet);',
       /* pick the two axes that run across whichever face we are on */
       '  vec2 face = abs(vN.y) > 0.5 ? vL.xz : (abs(vN.x) > 0.5 ? vL.zy : vL.xy);',
       '  vec2 span = abs(vN.y) > 0.5 ? vSize.xz : (abs(vN.x) > 0.5 ? vSize.zy : vSize.xy);',
@@ -8123,6 +8139,8 @@ function updateWeather(t) {
   var bow = wet * smoothstep(0.03, 0.18, elevSin) * (1 - smoothstep(0.50, 0.78, elevSin))
           * clamp(lightMul * 1.5, 0, 1) * smoothstep(0.05, 0.45, behind) * (1 - night);
   App.wetness = W.rain > 0.1 ? 1 : Math.max(0, (App.wetness || 0) - 0.0006);
+  /* frozen ground is not wet */
+  U.uWet.value = App.wetness * (1 - smoothstep(0.1, 0.4, U.uSnow.value));
   App.bowTarget = clamp(bow * 1.5, 0, 1);
   App.skyU.uBow.value += (App.bowTarget - App.skyU.uBow.value) * 0.02;
   /* snow under fog is a whiteout with nothing to look at; keep the world in reach */
