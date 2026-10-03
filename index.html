@@ -1418,6 +1418,41 @@ function buildParams(seedStr, nonce) {
     /* filled in by sizeWindow() once the viewport is known */
     w: 2, h: 2, cols: 1, rows: 1, arch: false, meetingRow: 0
   };
+  /* Where the window is in the house, and what lies under it. An eye a metre
+     and a half above uncut grass sees the grass and little else: the bottom
+     half of the view was blades, a marsh was a wall of reeds and a river was
+     somewhere behind them. Some houses look out from an upper floor; at
+     ground level there is usually something kept in front of the window, a
+     mown strip, gravel or a bare yard, before the country starts. Both are
+     part of what this place is, so they come from an identity stream of their
+     own, and every draw is taken whatever is used. */
+  var E = RNG(P.base + '/eye');
+  var EYE = {   /* [chance of an upper floor, lowest, highest eye height above the ground] */
+    river: [1, 3.6, 6.2], marsh: [1, 3.6, 6.0], cliffcoast: [0.85, 3.2, 6.0], terraces: [1, 4.5, 8.5],
+    farmland: [1, 3.8, 6.4], flowerfield: [0.75, 3.2, 5.2], lakefront: [0.6, 3.2, 5.6],
+    urban: [0.5, 7, 16], meadow: [0.3, 3.2, 5.0], hayfield: [0.3, 3.2, 5.0], savanna: [0.45, 3.4, 5.6],
+    lavender: [0.5, 3.4, 5.4], orchard: [0.35, 3.2, 5.0], blossom: [0.35, 3.2, 5.0], autumn: [0.3, 3.2, 5.0],
+    alpine: [0.35, 3.2, 5.6], bridge: [0.3, 3.2, 5.0], fjord: [0.35, 3.2, 5.6], cascade: [0.3, 3.2, 5.0],
+    moor: [0.25, 3.2, 5.0], tundra: [0.2, 3.2, 4.6], coast: [0.3, 3.2, 5.0], oasis: [0.3, 3.2, 5.0],
+    desert: [0.2, 3.2, 4.6], canyon: [0.6, 3.4, 7.0]
+  }[P.biomeKey] || [0, 0, 0];
+  var upper = E.f() < EYE[0], eyeH = E.range(EYE[1], EYE[2]);
+  /* the ground in front: 1 mown lawn, 2 gravel behind a low wall, 3 bare
+     yard, 4 a marsh bank kept clear of reeds */
+  var CLEAR = {
+    meadow: [1, 1, 0], flowerfield: [1, 1], river: [1, 1, 2], lakefront: [1, 2], marsh: [4],
+    cliffcoast: [1, 2], orchard: [1, 1, 3], blossom: [1, 1], autumn: [1, 3], alpine: [2, 1, 0],
+    farmland: [2, 3], lavender: [2, 2, 3], savanna: [3, 3, 0], urban: [1, 1, 2], bridge: [1, 2],
+    fjord: [2, 1], cascade: [2, 0], hayfield: [0, 3], moor: [0, 0, 2], tundra: [0, 2]
+  }[P.biomeKey] || [0];
+  var clearKind = E.pick(CLEAR), clearD = E.range(5, 9), clearWall = E.range(0.38, 0.62);
+  P.eyeH = upper ? eyeH : 0;
+  P.win.cy += P.eyeH;
+  P.clearKind = clearKind;
+  /* deep enough to read as kept ground, shallow enough to leave the view:
+     gravel behind its wall least of all, a marsh bank most */
+  P.clearD = clearKind ? clearD * [0, 0.75, 0.6, 0.8, 2.0][clearKind] : 0;
+  P.clearWall = clearKind === 2 ? clearWall : 0;
   return P;
 }
 
@@ -2524,6 +2559,7 @@ function buildWorld(seed) {
   }
   if ((P.terrainKind || P.biome.terrain) === 'cascade') buildCascadeFall(scene, P, R, U, H);
   buildBoundaries(scene, P, R, U, H);
+  buildTerraceWall(scene, P, U, H);
   buildHerd(scene, P, R, U, H);
   buildWaterLife(scene, P, R, U, H);
   buildRidges(scene, P, R, U);
@@ -2709,8 +2745,10 @@ function makeHeightField(P) {
       var c = -edge + Math.sin(x * 0.017 + cph) * amp2
         + Math.sin(x * 0.041 - cph * 0.7) * amp2 * 0.35
         + fbm2(x * 0.008, 4.2, s + 71, 2) * amp2 * 0.5;
-      /* however the coast swings, the house is never on the edge of it */
-      return Math.min(c, -12 - Math.abs(x) * 0.1);
+      /* however the coast swings, the house is never on the edge of it; from
+         an upper floor the clifftop must reach out past the foot of the view,
+         or the house seems to hang over the water */
+      return Math.min(c, -12 - (P.eyeH || 0) * 3 - Math.abs(x) * 0.1);
     };
     return function (x, z) {
       var d = Math.sqrt(x * x + z * z);
@@ -2776,7 +2814,10 @@ function makeHeightField(P) {
     var ldrop = P.beachDrop, lrun = P.shoreRun, lfar = P.lakeFar;
     return function (x, z) {
       var d = Math.sqrt(x * x + z * z);
-      var out = smoothstep(-4.5, -4.5 - lrun, z);
+      /* the bank runs further out under an upper-floor window, so the view
+         has a shore at its foot and not only water */
+      var l0 = -4.5 - (P.eyeH || 0) * 2.5;
+      var out = smoothstep(l0, l0 - lrun, z);
       var h = -out * ldrop;
       h += fbm2(x * 0.03, z * 0.03, s, 3) * 0.5 * (1 - out) * smoothstep(3, 22, d);
       h += fbm2(x * 0.011, z * 0.011, s + 41, 2) * 1.1 * (1 - out * 0.8) * smoothstep(2, 30, d);
@@ -3230,6 +3271,9 @@ function buildTerrain(scene, P, R, U, H) {
     uPathPh2: { value: P.pathPhase2 || 0 },
     uPathGauge: { value: P.pathGauge || 0.0 },
     uPathCol: { value: new THREE.Color(P.grass.soil) },
+    /* the kept ground under the window: depth, edge wobble, edge softness, kind */
+    uClear: { value: new THREE.Vector4(P.clearD || 0, P.clearKind ? CLEAR_EDGE[P.clearKind][0] : 0,
+                                       P.clearKind ? CLEAR_EDGE[P.clearKind][1] : 1, P.clearKind || 0) },
     uStrata: { value: P.strata || 0 },
     uStrataLo: { value: -(P.canyonDepth || 60) },
     uStrataHi: { value: 16 },
@@ -3260,7 +3304,12 @@ function buildTerrain(scene, P, R, U, H) {
       'uniform vec2 uRowDir; uniform vec3 uRowCol, uRowSoil;',
       'uniform float uStrata, uStrataLo, uStrataHi;',
       'uniform float uPathW, uPathX, uPathZ, uPathBend, uPathPh, uPathBend2, uPathK2, uPathPh2, uPathGauge;',
-      'uniform vec2 uPathDir; uniform vec3 uPathCol;',
+      'uniform vec2 uPathDir; uniform vec3 uPathCol; uniform vec4 uClear;',
+      /* the same edge as clearAt() in the script */
+      'float clearAmt(vec3 w){',
+      '  float edge = -uClear.x + uClear.y * (sin(w.x * 0.31 + 0.7) + 0.6 * sin(w.x * 0.83 + 2.1));',
+      '  return uClear.w > 0.5 ? smoothstep(edge - uClear.z, edge + uClear.z, w.z) : 0.0;',
+      '}',
       /* the same frame and sum as pathOff() in the script */
       'float pathAmt(vec3 w){',
       '  if (uPathW < 0.01) return 0.0;',
@@ -3329,6 +3378,17 @@ function buildTerrain(scene, P, R, U, H) {
       '  float kG = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 6.0);',
       '  float dirt = vn(vW.xz * 1.3) * 0.55 + mix(0.5, vn(vW.xz * 6.0 + 17.0), kG) * 0.45;',
       '  if (onPath > 0.001) c = mix(c, uPathCol * (0.80 + 0.36 * dirt), onPath * 0.88);',
+      /* the kept ground: a lawn mown in stripes, pale gravel, a bare yard, or a
+         damp bank. The stripes fade once finer than a pixel. */
+      '  float inClear = clearAmt(vW);',
+      '  if (inClear > 0.001) {',
+      '    float kM = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 0.56);',
+      '    vec3 lawn = uCoverCol * (0.80 + 0.30 * fine.g) * (1.0 + 0.07 * sin(vW.x * 3.49) * kM);',
+      '    vec3 gravel = mix(vec3(0.60, 0.58, 0.54), uPathCol, 0.35) * (0.74 + 0.30 * dirt + 0.22 * grit.r * near);',
+      '    vec3 yard = uPathCol * (0.82 + 0.34 * dirt);',
+      '    vec3 kept = uClear.w < 1.5 ? lawn : (uClear.w < 2.5 ? gravel : (uClear.w < 3.5 ? yard : c * 0.80));',
+      '    c = mix(c, kept, inClear * (uClear.w < 1.5 ? 0.55 : 0.9));',
+      '  }',
       '  if (uStrata > 0.5) {',
       '    float u = (vW.y - uStrataLo) / max(uStrataHi - uStrataLo, 1.0);',
       '    float band = floor(u * uStrata);',
@@ -3554,6 +3614,12 @@ function buildGrass(scene, P, R, U, H) {
     var dist = Math.sqrt(x * x + z * z);
     if (dist < 1.0 || dist > (P.coverRows ? 54 : 35)) continue;
     if (P.pathKind && onPathAt(P, x, z) > R.f() * 0.55) continue;
+    /* the kept ground under the window: mown short, or nothing grows on it */
+    if (P.clearKind) {
+      var ck = clearAt(P, x, z);
+      if (P.clearKind === 1) hMul *= 1 - ck * 0.8;
+      else if (R.f() < ck * (P.clearKind === 3 ? 0.93 : 1)) continue;
+    }
     /* thin patches and the odd bare spot: a field is not a carpet */
     var thin = fbm2(x * 0.045 + 3.1, z * 0.045, P.terrainSeed + 5, 2);
     if (thin < -0.48 && R.f() < 0.85 && !P.rowSpacing) continue;
@@ -3563,6 +3629,9 @@ function buildGrass(scene, P, R, U, H) {
       /* reeds stand in the shallows; grass keeps its feet dry */
       if (gh < P.waterY + (P.coverWet ? -0.30 : 0.25)) continue;
       if (P.coverMinH && gh < P.waterY + P.coverMinH) continue;
+      /* reeds stand in beds along the water; the drier ground between is
+         grazed and only carries a few */
+      if (P.coverStyle === 'reeds' && R.f() < 0.75 * smoothstep(0.35, 0.9, gh - P.waterY)) continue;
     }
     var ang = Math.abs(Math.atan2(x, -z));
     if (ang > 1.30) continue;
@@ -3738,6 +3807,7 @@ function buildFlowers(scene, P, R, U, H) {
       if (d < 1.4 || d > Math.min(P.flowerReach || 44, 36) || z > -1.0) continue;
       if (Math.abs(Math.atan2(x, -z)) > 1.15) continue;
       if (P.pathKind && onPathAt(P, x, z) > 0.3) continue;   /* trodden flat */
+      if (P.clearKind && clearAt(P, x, z + 0.4) > 0.1) continue;   /* mown, or not grown */
       if (P.waterY != null) {
       var gh = H(x, z);
       /* reeds stand in the shallows; grass keeps its feet dry */
@@ -6070,6 +6140,7 @@ function buildBoundaries(scene, P, R, U, H) {
       if (Math.abs(u - gapAt) < gapW) continue;
       if (P.waterY != null && H(x, z) < P.waterY + 0.3) continue;
       if (P.pathKind && onPathAt(P, x, z) > 0.4) continue;
+      if (P.clearKind && clearAt(P, x, z + 1.5) > 0) continue;
       var y = H(x, z);
       var jx = x + R.gauss() * 0.12, jz = z + R.gauss() * 0.12;
       if (kind === 'fence') {
@@ -6098,6 +6169,25 @@ function buildBoundaries(scene, P, R, U, H) {
   if (bushes.length) boundaryBillboards(scene, P, R, U, H, bushes, 'hedge');
   if (trees.length) boundaryBillboards(scene, P, R, U, H, trees, P.seasonKey === 'winter' ? 'broadleaf' : (R.f() < 0.5 ? 'pine' : 'broadleaf'));
 }
+/* A low stone wall along the far edge of a gravel terrace: the line where
+   the kept ground stops and the country starts, with a gap where a path
+   goes through. Its own stream, so it moves nothing else. */
+function buildTerraceWall(scene, P, U, H) {
+  if (!P.clearWall) return;
+  var WR = RNG(P.base + '/build/terrace' + (P.nonce ? '/' + P.nonce : ''));
+  var items = [], step = 1.7, half = P.clearD * 2.6, z = -P.clearD - 0.25;
+  for (var x = -half; x <= half; x += step) {
+    if (P.pathKind && onPathAt(P, x, z) > 0.05) continue;
+    if (P.waterY != null && H(x, z) < P.waterY + 0.3) continue;
+    var y = Math.min(H(x - step * 0.5, z), H(x + step * 0.5, z)) - 0.06;
+    items.push([x + WR.range(-0.04, 0.04), y, z + WR.range(-0.03, 0.03), 1, WR.range(-0.02, 0.02),
+                P.clearWall / 1.12 * WR.range(0.94, 1.06), 1.25]);
+  }
+  if (!items.length) return;
+  instanceSolid(scene, boundaryStone(WR), items,
+    solidMat(U, WR.pick(['#8b8578', '#7d7a70', '#948d7e', '#8a7f6e']), { rib: 0, grain: 2, spines: 0, body2: '#9a9488', lichen: '#9aa15a' }));
+}
+
 function boundaryBillboards(scene, P, R, U, H, items, kind) {
   var quad = new THREE.PlaneGeometry(1, 1);
   quad.translate(0, 0.5, 0);
@@ -7020,6 +7110,7 @@ function buildClutter(scene, P, R, U, H) {
       if (P.waterY != null && H(x, z) < P.waterY + 0.2) continue;
       /* a worn path is where nothing low grows */
       if (kind === 'tufts' && P.pathKind && onPathAt(P, x, z) > 0.3) continue;
+      if (kind !== 'litter' && P.clearKind && P.clearKind < 3 && clearAt(P, x, z + 0.4) > 0.05) continue;
       var csz = R.range(0.22, 0.85) * (kind === 'tufts' && !CLUTTER_GRAVEL[P.biomeKey] ? 1.5 : 1);
       var crot = R.range(0, 6.283);
       /* the stones are painted lit from the upper left of their card; turn
@@ -7115,8 +7206,21 @@ function onPathAt(P, x, z) {
   return 1 - smoothstep(P.pathW, P.pathW * 1.5, off);
 }
 
+/* The kept ground in front of the house (P.clearKind, see buildParams): a
+   strip along the wall out to P.clearD, its far edge straight for gravel and
+   wandering for a lawn, a yard or a marsh bank. 1 inside, 0 beyond. The
+   terrain shader's clearAmt() is the same curve. */
+var CLEAR_EDGE = [[0, 0], [0.25, 0.25], [0, 0.06], [0.8, 0.6], [1.6, 0.9]];   /* [wobble, softness] by kind */
+function clearAt(P, x, z) {
+  if (!P.clearKind) return 0;
+  var k = CLEAR_EDGE[P.clearKind];
+  var edge = -P.clearD + k[0] * (Math.sin(x * 0.31 + 0.7) + 0.6 * Math.sin(x * 0.83 + 2.1));
+  return smoothstep(edge - k[1], edge + k[1], z);
+}
+
 function plantable(P, H, x, z) {
   if (P.waterY != null && H(x, z) < P.waterY + 0.25) return false;
+  if (P.clearKind && clearAt(P, x, z + 0.6) > 0) return false;
   if (P.pathKind && onPathAt(P, x, z) > 0.55) return false;
   /* nothing grows up between the wheel ruts big enough to stop a tractor */
   if (P.pathKind && P.pathGauge > 0.01 && pathOff(P, x, z) < P.pathGauge * 0.5 + P.pathW) return false;
