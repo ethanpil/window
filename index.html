@@ -2526,6 +2526,14 @@ function buildWorld(seed) {
   var amb = new THREE.AmbientLight(0xffffff, 0.34);
   scene.add(amb);
   App.amb = amb;
+  /* the sky seen through the opening: it lights the sill top and the two
+     reveals from outside, one light leaning to each side */
+  App.skyLights = [-0.55, 0.55].map(function (sx) {
+    var l = new THREE.DirectionalLight(0xffffff, 0.3);
+    l.position.set(sx, 0.6, -1);
+    scene.add(l);
+    return l;
+  });
   shareCommon(scene);
 
   updateWeather(App.t || 0);
@@ -8254,10 +8262,16 @@ function updateWeather(t) {
   App.sun.position.copy(sd).multiplyScalar(60);
   App.sun.target.position.set(0, P.win.cy, 0);
   App.sun.color.copy(U.uSunCol.value);
-  /* the sun lights the room only through the window, not through the back wall */
-  App.sun.intensity = 0.9 * smoothstep(0.05, -0.15, sd.z);
+  /* the sun lights the room only through the window, not through the back
+     wall, and only while it is up */
+  App.sun.intensity = 0.9 * smoothstep(0.05, -0.15, sd.z) * smoothstep(0.0, 0.06, sd.y);
   App.fill.color.copy(U.uAmbCol.value);
-  App.fill.intensity = 1.25;
+  /* the room is dimmer than the day outside, so the view glows out of it */
+  App.fill.intensity = 0.78;
+  for (var sl = 0; sl < App.skyLights.length; sl++) {
+    App.skyLights[sl].color.copy(U.uInScat.value);
+    App.skyLights[sl].intensity = 0.42;
+  }
   App.amb.color.copy(U.uFogCol.value);
   App.amb.intensity = 0.40;
   if (App.glassMat) App.glassMat.opacity = (0.14 + 0.18 * lightMul) * (1 - night * 0.55);
