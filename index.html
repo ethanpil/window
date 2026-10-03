@@ -6544,6 +6544,10 @@ function buildRoofs(scene, P, R, U, items) {
    A single fading noise field cannot do that; these can. */
 function buildRidges(scene, P, R, U) {
   if (P.biomeKey === 'penthouse') return;
+  /* dry country weathers into mesas and buttes: flat caps, steep sides,
+     scree spreading at the foot */
+  var mesa = ARID[P.biomeKey] && P.biomeKey !== 'savanna';
+  var snowy = !mesa && (P.seasonKey === 'winter' || P.biomeKey === 'alpine' || P.biomeKey === 'fjord' || P.biomeKey === 'tundra');
   var layers = R.int(2, 4);
   for (var i = 0; i < layers; i++) {
     /* Beyond the terrain's own relief (it reaches 2400 m) so the two do not
@@ -6551,47 +6555,84 @@ function buildRidges(scene, P, R, U) {
        nearer than the ridge and cover it. */
     var dist = Math.min(2900, 2480 + i * R.range(90, 150));
     var height = dist * R.range(0.035, 0.075) * (1 + i * 0.22);
-    var segs = 128, width = dist * 3.2;
+    /* 512 segments: at 128 each was 60 m wide and the skyline kinked */
+    var segs = 512, width = dist * 3.2;
     var g = new THREE.PlaneGeometry(width, height * 2.4, segs, 1);
     var pos = g.attributes.position;
     var seed = R.int(1, 9999), rough = R.range(0.5, 1.0);
-    for (var v = 0; v < pos.count; v++) {
+    var v, top = [];
+    for (v = 0; v <= segs; v++) {
       var x = pos.getX(v);
-      if (pos.getY(v) > 0) {
-        /* the skyline: a ridged profile with a few summits standing above it */
-        var n = ridged(x * 0.0016 + seed, seed * 0.1, seed, 4);
-        var n2 = fbm2(x * 0.0005, seed * 0.3, seed + 7, 2);
-        pos.setY(v, (n * 0.75 + Math.abs(n2) * 0.55) * height * rough - height * 0.15);
-      } else pos.setY(v, -height * 1.4);
+      /* the skyline: a ridged profile with a few summits standing above it */
+      var n = ridged(x * 0.0016 + seed, seed * 0.1, seed, 4);
+      var n2 = fbm2(x * 0.0005, seed * 0.3, seed + 7, 2);
+      var y = (n * 0.75 + Math.abs(n2) * 0.55) * height * rough - height * 0.15;
+      if (mesa) {
+        /* terraced: each band rises in a short cliff and runs flat */
+        var stp = height * 0.34, u = (y + height * 0.15) / stp, f = u - Math.floor(u);
+        y = (Math.floor(u) + smoothstep(0.72, 0.92, f) + 0.12 * Math.min(f, 0.72) / 0.72) * stp - height * 0.15;
+      }
+      top.push(y);
     }
+    var slope = new Float32Array(pos.count), dx = width / segs;
+    for (v = 0; v <= segs; v++) {
+      pos.setY(v, top[v]);
+      pos.setY(v + segs + 1, -height * 1.4);
+      var s = (top[Math.min(segs, v + 1)] - top[Math.max(0, v - 1)]) / (2 * dx);
+      slope[v] = slope[v + segs + 1] = s;
+    }
+    g.setAttribute('aSlope', new THREE.BufferAttribute(slope, 1));
     g.computeVertexNormals();
     var mat = new THREE.ShaderMaterial({
       uniforms: {
         uFogCol: U.uFogCol, uSunCol: U.uSunCol, uSunDir: U.uSunDir, uHazeK: U.uHazeK,
-        uZenith: App.skyU.uZenith,
-        uDepth: { value: 0.55 + i * 0.16 }
+        uAmbCol: U.uAmbCol, uZenith: App.skyU.uZenith,
+        uDepth: { value: Math.min(0.62 + i * 0.12, 0.92) },
+        uHeight: { value: height },
+        uSnowCap: { value: snowy ? 0.55 : 2.0 },
+        /* each layer its own faint cast, from its own seed, not a new draw */
+        uHue: { value: new THREE.Vector3(1 + ((seed % 7) - 3) * 0.008, 1, 1 - ((seed % 5) - 2) * 0.010) }
       },
       side: THREE.DoubleSide, depthWrite: true, transparent: true,
+      extensions: { derivatives: true },
       vertexShader: [
-        'varying vec3 vW; varying float vTop;',
-        'void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vW = wp.xyz; vTop = position.y;',
+        'attribute float aSlope;',
+        'varying vec3 vW; varying float vTop; varying float vSlope;',
+        'void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vW = wp.xyz; vTop = position.y; vSlope = aSlope;',
         '  gl_Position = projectionMatrix * viewMatrix * wp; }'
       ].join('\n'),
       fragmentShader: [
         GLSL_TONE,
-        'uniform vec3 uFogCol, uFogAway, uSunCol, uSunDir, uZenith; uniform float uDepth, uHazeK;',
-        'varying vec3 vW; varying float vTop;',
+        'uniform vec3 uFogCol, uFogAway, uSunCol, uSunDir, uAmbCol, uZenith, uHue; uniform float uDepth, uHazeK, uHeight, uSnowCap;',
+        'varying vec3 vW; varying float vTop; varying float vSlope;',
+        'float rh(float p){ return fract(sin(p * 127.1) * 43758.5453); }',
+        'float rn(float p){ float i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(rh(i), rh(i + 1.0), f); }',
         'void main(){',
         /* the horizon behind them, warm toward the sun and cool away (horizonAt) */
         '  vec3 vd = normalize(vW - cameraPosition);',
         '  float wAz = dot(normalize(vd.xz + vec2(1e-5)), normalize(uSunDir.xz + vec2(1e-5))) * 0.5 + 0.5;',
         '  vec3 hor = mix(uFogAway, uFogCol, smoothstep(0.0, 1.0, wAz));',
-        /* each ridge is mostly the colour of the air in front of it, a little
-           darker at its foot where less air intervenes */
-        '  float low = clamp(1.0 - (vTop + 40.0) / 140.0, 0.0, 1.0);',
-        '  vec3 c = mix(hor, hor * vec3(0.90, 0.94, 1.06), uDepth);',
-        '  c *= 1.0 - 0.13 * (1.0 - uDepth) * (1.0 - low);',
-        '  float f = pow(max(dot(vd, normalize(uSunDir)), 0.0), 3.0) * uHazeK;',
+        '  float hN = vTop / uHeight;',                       /* 0 near the foot, ~1 at the summits */
+        /* A face of its own: the profile's slope turns it toward or away from
+           the sun, and gullies run down it. The gullies fade once they are
+           finer than a pixel. */
+        '  float gq = vW.x * 0.018;',
+        '  float kG = 1.0 - smoothstep(0.30, 0.85, fwidth(gq));',
+        '  float gully = (rn(gq) - 0.5) * 1.6 * kG;',
+        '  vec3 n = normalize(vec3(-(vSlope * 2.5 + gully), 0.55, 1.0));',
+        '  vec3 sd = normalize(uSunDir);',
+        '  float sunK = clamp(dot(uSunCol, vec3(0.30, 0.59, 0.11)) * 1.4, 0.0, 1.0);',
+        '  float shade = mix(1.0, 0.80 + 0.45 * max(dot(n, sd), 0.0), sunK);',
+        /* the land under the air: darker and a little bluer than the horizon,
+           white above the snow line */
+        '  vec3 land = hor * vec3(0.62, 0.68, 0.78) * uHue;',
+        '  float snow = smoothstep(uSnowCap, uSnowCap + 0.12, hN + gully * 0.08);',
+        '  land = mix(land, hor * vec3(1.10, 1.12, 1.16), snow);',
+        '  land *= shade;',
+        /* the valleys hold the haze; summits stand clearer */
+        '  float haze = uDepth * mix(1.0, 0.82, smoothstep(-0.6, 1.0, hN));',
+        '  vec3 c = mix(land, hor, haze);',
+        '  float f = pow(max(dot(vd, sd), 0.0), 3.0) * uHazeK;',
         '  c += uSunCol * f * 0.06;',
         '  gl_FragColor = vec4(tone(c), 1.0);',
         '}'
