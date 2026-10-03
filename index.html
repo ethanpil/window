@@ -1129,7 +1129,9 @@ function buildParams(seedStr, nonce) {
     P.gorgeBend = LR.range(-40, 40);
     P.waterY = -P.gorgeDepth + LR.range(1.0, 3.0);
     P.shoreZ = -40;
-    P.bridgeKind = LR.pick(['suspension', 'arch', 'girder', 'stone']);
+    /* what kind of bridge it is, is identity: R.pick takes the same one R draw
+       LR.pick did, so the identity stream stays in step */
+    P.bridgeKind = R.pick(['suspension', 'arch', 'girder', 'stone']);
     P.bridgeZ = -LR.range(95, 210);
     P.bridgeDeck = P.waterY + P.gorgeDepth * LR.range(0.86, 1.02);
     P.trafficRate = LR.range(0.5, 2.4);          /* vehicles a second, each way */
@@ -5014,8 +5016,14 @@ function buildLandmark(scene, P, R, U, H) {
   if (/penthouse|bridge|cascade|canyon/.test(P.biomeKey)) { App.landmark = null; return; }
   var opts = [];
   for (var k in LANDMARKS) if (LANDMARKS[k].biomes.indexOf(P.biomeKey) >= 0) opts.push(k);
-  if (!opts.length || R.f() > 0.72) { App.landmark = null; return; }
-  var kind = R.pick(opts), L = LANDMARKS[kind];
+  /* Whether there is one, what it is and how big are part of what this place
+   is, so they come from an identity stream: drawn from R, which carries the
+   layout nonce, a reshuffle turned a barn into a tower. Where it stands is
+   layout and stays on R. */
+  var IR = RNG(P.base + '/landmark');
+  var present = IR.f() <= 0.72, kind = opts.length ? IR.pick(opts) : null;
+  var L = kind ? LANDMARKS[kind] : null, sz = L ? IR.range(L.scale[0], L.scale[1]) : 0;
+  if (!opts.length || !present) { App.landmark = null; return; }
   /* off to one side but inside the glass: a landmark you cannot see is no
      landmark at all. The bare view has no frame, so it sees a little wider. */
   var lim = visibleHalfAngle(P) * (App.bare ? 1.05 : 0.80);
@@ -5047,7 +5055,6 @@ function buildLandmark(scene, P, R, U, H) {
   if (wet(x, z)) { App.landmark = null; return; }
   var y = H(x, z);
   if (kind === 'jetty' && P.waterY != null) y = P.waterY - 0.4;
-  var sz = R.range(L.scale[0], L.scale[1]);
   var mat = solidMat(U, L.body, { rib: 0, grain: 0, spines: 0, body2: L.trim, twoTone: 1 });
   instanceSolid(scene, landmarkGeo(kind, R), [[x, y, z, sz, 0, 1, 1]], mat);
   App._shadows.push([x, y, z, sz * 0.30, 0.85, sz]);
