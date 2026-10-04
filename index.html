@@ -2741,8 +2741,11 @@ function buildWorld(seed) {
     uCloudShift: { value: new THREE.Vector2() },
     uWet:       { value: 0 },
     uMirage:    { value: 0 },
+    /* until a bake, and for good where there are no vertex textures (see
+       applyShadowMap): lit, no AO, deep water, and A 0, a shadow that
+       climbs nowhere (255 would put a city in shade up to 480 m) */
     uShadowMap: { value: (function () {
-      var t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
+      var t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1, THREE.RGBAFormat);
       t.needsUpdate = true; return t;
     })() },
     uNearMap: { value: (function () {
