@@ -5747,6 +5747,10 @@ function buildCityHouses(scene, P, U, H, C) {
     var gx = bx * C.pitch, gz = bz * C.pitch, w0 = C.toWorld(gx, gz), d0 = Math.sqrt(w0[0] * w0[0] + w0[1] * w0[1]);
     if (d0 < C.streetStart || d0 >= C.start || Math.abs(Math.atan2(w0[0], -w0[1])) > lim) continue;
     var L = Math.max(C.bw * 0.5 - 14, 6);
+    /* the rows round a block meet at its corners: a house that would stand
+       in one already placed (a metre's gap kept) is left out. Footprints in
+       the grid frame, where they are square to the axes. */
+    var placed = [];
     for (var si = 0; si < 4; si++) {
       var n = sides[si], t = [-n[1], n[0]];
       var a = -L;
@@ -5756,6 +5760,10 @@ function buildCityHouses(scene, P, U, H, C) {
         var ac = a + tp.w * 0.5, inn = C.bw * 0.5 - sb - tp.d * 0.5;
         var cx = gx + n[0] * inn + t[0] * ac, cz = gz + n[1] * inn + t[1] * ac;
         a += tp.w + HR.range(3, 7);
+        var fx = n[0] ? tp.d * 0.5 : tp.w * 0.5, fz = n[0] ? tp.w * 0.5 : tp.d * 0.5, hit = false;
+        for (var pi = 0; pi < placed.length && !hit; pi++)
+          hit = Math.abs(cx - placed[pi][0]) < fx + placed[pi][2] + 1 && Math.abs(cz - placed[pi][1]) < fz + placed[pi][3] + 1;
+        if (hit) continue;
         var w = C.toWorld(cx, cz), rot = Math.atan2(-n[0], n[1]) + C.ga;
         var c = Math.cos(rot), s = Math.sin(rot), lo = 1e9, wet = false;
         for (var q = 0; q < 4; q++) {
@@ -5765,6 +5773,7 @@ function buildCityHouses(scene, P, U, H, C) {
           lo = Math.min(lo, y);
         }
         if (wet) continue;
+        placed.push([cx, cz, fx, fz]);
         var mi = HR.int(0, 2), key = ti + '_' + mi;
         (groups[key] = groups[key] || []).push([w[0], lo - 0.3, w[1], 1, rot, 1, 1]);
         App._boxes.push([w[0], w[1], tp.w * 0.5, tp.d * 0.5, rot, lo + tp.top * 0.8]);
