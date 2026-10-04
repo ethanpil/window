@@ -6671,7 +6671,7 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
       reachY = Math.max(reachY, Math.abs(mine[m2][3] + mine[m2][2] * 0.5 - gy) + mine[m2][2] * 0.35);
     }
     var base = H(items[k][0], items[k][1]);
-    for (m2 = 0; m2 < mine.length; m2++) cards.push(mine[m2].concat([gx, base + gy, gz, reach, reachY, fade]));
+    for (m2 = 0; m2 < mine.length; m2++) cards.push(mine[m2].concat([gx, base + gy, gz, reach, reachY, fade, base]));
   }
   var quad = new THREE.PlaneGeometry(1, 1); quad.translate(0, 0.5, 0);
   var geo = new THREE.InstancedBufferGeometry();
@@ -6680,7 +6680,9 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
   var iCrown = new Float32Array(cards.length * 4), iShape = new Float32Array(cards.length * 2);
   for (var q = 0; q < cards.length; q++) {
     var cd = cards[q];
-    iPos[q * 3] = cd[0]; iPos[q * 3 + 1] = H(cd[0], cd[1]) + cd[3]; iPos[q * 3 + 2] = cd[1];
+    /* hung from the trunk's foot, not the ground under each card: on a
+       slope that sheared the crown off its limbs and its own middle */
+    iPos[q * 3] = cd[0]; iPos[q * 3 + 1] = cd[12] + cd[3]; iPos[q * 3 + 2] = cd[1];
     iAttr[q * 4] = cd[2]; iAttr[q * 4 + 1] = cd[4]; iAttr[q * 4 + 2] = cd[11]; iAttr[q * 4 + 3] = cd[5];
     iCrown[q * 4] = cd[6]; iCrown[q * 4 + 1] = cd[7]; iCrown[q * 4 + 2] = cd[8]; iCrown[q * 4 + 3] = cd[9];
     iShape[q * 2] = cd[10]; iShape[q * 2 + 1] = 0;
