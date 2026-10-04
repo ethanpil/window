@@ -5741,6 +5741,9 @@ function buildCityHouses(scene, P, U, H, C) {
     solidMat(U, HR.pick(['#b7c0bf', '#c9c3b2', '#a9b4ae']), { rib: 0, grain: 0, spines: 0, twoTone: 1, body2: roofCol, aoH: 0.4, facade: { kind: 0, win: 0.8, bay: 2.4, roof: 0, doorW: 1.0, doorH: 2.1 } })
   ];
   var groups = {};
+  /* a front hedge to most gardens, along the lot line at the pavement, cut
+     for the gate in front of the door: their own stream */
+  var GR = RNG(P.base + '/build/gardens' + (P.nonce ? '/' + P.nonce : '')), hedges = [];
   var sides = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   var nb = Math.ceil(C.start / C.pitch) + 1, lim = Math.max(visibleHalfAngle(P) * 1.25, 0.9);
   for (var bx = -nb; bx <= nb; bx++) for (var bz = -nb; bz <= 0; bz++) {
@@ -5774,6 +5777,13 @@ function buildCityHouses(scene, P, U, H, C) {
         }
         if (wet) continue;
         placed.push([cx, cz, fx, fz]);
+        if (GR.f() < 0.6) {
+          var hn = C.bw * 0.5 - 0.6, hf = tp.w * 0.5 + 1.2, hd = C.toWorld(t[0], t[1]);
+          for (var hs = -1; hs <= 1; hs += 2) {
+            var ht = ac + hs * (hf + 0.8) * 0.5, hw = C.toWorld(gx + n[0] * hn + t[0] * ht, gz + n[1] * hn + t[1] * ht);
+            hedges.push({ x: hw[0], z: hw[1], ca: hd[0], sa: hd[1], half: (hf - 0.8) * 0.5, garden: true });
+          }
+        }
         var mi = HR.int(0, 2), key = ti + '_' + mi;
         (groups[key] = groups[key] || []).push([w[0], lo - 0.3, w[1], 1, rot, 1, 1]);
         App._boxes.push([w[0], w[1], tp.w * 0.5, tp.d * 0.5, rot, lo + tp.top * 0.8]);
@@ -5784,6 +5794,7 @@ function buildCityHouses(scene, P, U, H, C) {
     var parts = k.split('_');
     instanceSolid(scene, T[+parts[0]].g, groups[k], mats[+parts[1]]);
   }
+  if (hedges.length) buildHedgeLines(scene, P, U, H, hedges, GR.range(1.0, 1.4), GR);
 }
 
 /* ---------- a city ----------
@@ -8281,9 +8292,10 @@ function buildHedgeLines(scene, P, U, H, lines, hgt, HR) {
       if (d < 12 || d > 430) continue;
       if (Math.abs((t + ln.half) / (2 * ln.half) - gapAt) < gapW) continue;
       if (P.waterY != null && H(x, z) < P.waterY + 0.3) continue;
-      if (P.pathKind && onPathAt(P, x, z) > 0.3) continue;
+      if (pathBlocked(P, x, z, 0.3, step * 0.5)) continue;
       if (P.clearKind && clearAt(P, x, z + 1.5) > 0) continue;
       if (slopeAt(H, x, z) > 0.55) continue;
+      if (!ln.garden && inTown(P, x, z, step * 0.5)) continue;
       var y = Math.min(H(x - ln.ca * step * 0.5, z - ln.sa * step * 0.5), H(x + ln.ca * step * 0.5, z + ln.sa * step * 0.5)) - 0.08;
       /* the height wanders slowly along the line; whole lengths are dealt
          from a few forms, turned end for end */
@@ -8342,6 +8354,8 @@ function buildBoundaries(scene, P, R, U, H) {
       /* a canyon's fences keep to the rim: none down the benches and walls
          (decided after the draws, so the stream is drawn as before) */
       var keepF = !(P.biomeKey === 'canyon' && (y < -6 || slopeAt(H, x, z) > 0.25));
+      /* and a gap is left where a track passes, ruts and crown (likewise) */
+      keepF = keepF && !pathBlocked(P, x, z, 0.4, step * 0.5);
       if (kind === 'fence') {
         var postH = R.range(0.85, 1.1);
         if (keepF) {
@@ -8350,13 +8364,15 @@ function buildBoundaries(scene, P, R, U, H) {
                       step * 0.52, ln.a, 1, 1]);
         }
       } else if (kind === 'wall') {
-        stones.push([jx, y - 0.05, jz, R.range(0.92, 1.12), ln.a + R.range(-0.05, 0.05), R.range(0.9, 1.1), 1]);
+        var stone = [jx, y - 0.05, jz, R.range(0.92, 1.12), ln.a + R.range(-0.05, 0.05), R.range(0.9, 1.1), 1];
+        if (keepF) stones.push(stone);
       } else if (kind === 'shelter') {
-        trees.push([jx, jz, R.range(6, 13)]);
+        var tree = [jx, jz, R.range(6, 13)];
+        if (keepF) trees.push(tree);
       } else {
         bushes.push([jx, jz, R.range(1.5, 2.9)]);     /* drawn only to keep the stream in step */
       }
-      if (d < 240 && (kind === 'wall' || kind === 'shelter'))
+      if (keepF && d < 240 && (kind === 'wall' || kind === 'shelter'))
         App._shadows.push([x, y, z, kind === 'shelter' ? 2.6 : 1.0, 0.7, kind === 'shelter' ? 8 : 1.6]);
     }
   }
@@ -8395,7 +8411,7 @@ function buildTerraceWall(scene, P, U, H) {
   var WR = RNG(P.base + '/build/terrace' + (P.nonce ? '/' + P.nonce : ''));
   var items = [], step = 1.7, half = P.clearD * 2.6, z = -P.clearD - 0.25;
   for (var x = -half; x <= half; x += step) {
-    if (P.pathKind && onPathAt(P, x, z) > 0.05) continue;
+    if (pathBlocked(P, x, z, 0.05, step * 0.5)) continue;
     if (P.waterY != null && H(x, z) < P.waterY + 0.3) continue;
     var y = Math.min(H(x - step * 0.5, z), H(x + step * 0.5, z)) - 0.06;
     items.push([x + WR.range(-0.04, 0.04), y, z + WR.range(-0.03, 0.03), 1, WR.range(-0.02, 0.02),
@@ -9495,6 +9511,36 @@ function onPathAt(P, x, z) {
   return 1 - smoothstep(P.pathW, P.pathW * 1.5, off);
 }
 
+/* Whether a path stops anything standing at (x, z): its worn surface past
+   amt (onPathAt), or for a track the whole width between and over its wheel
+   ruts, which onPathAt leaves at 0 on the grass crown. margin: how far the
+   thing reaches either way along its own line (a length of hedge or wall). */
+function pathBlocked(P, x, z, amt, margin) {
+  if (!P.pathKind) return false;
+  if (onPathAt(P, x, z) > amt) return true;
+  return P.pathGauge > 0.01 && pathOff(P, x, z) < P.pathGauge * 0.5 + P.pathW + (margin || 0);
+}
+
+/* Whether (x, z) is in a town's streets or under one of its buildings,
+   within margin: a field hedgerow laid across a city front ran through
+   houses and down the streets. */
+function inTown(P, x, z, margin) {
+  var C = cityPlan(P);
+  if (!C) return false;
+  var d = Math.sqrt(x * x + z * z);
+  if (d >= C.streetStart - margin && d <= C.end + C.pitch) {
+    var g = C.toGrid(x, z), lx = g[0] - Math.round(g[0] / C.pitch) * C.pitch, lz = g[1] - Math.round(g[1] / C.pitch) * C.pitch;
+    if (Math.max(Math.abs(lx), Math.abs(lz)) > C.bw * 0.5 - margin) return true;
+  }
+  for (var i = 0; i < App._boxes.length; i++) {
+    var b = App._boxes[i], dx = x - b[0], dz = z - b[1];
+    if (Math.abs(dx) > 80 || Math.abs(dz) > 80) continue;
+    var c = Math.cos(b[4]), s = Math.sin(b[4]);
+    if (Math.abs(dx * c + dz * s) < b[2] + margin && Math.abs(-dx * s + dz * c) < b[3] + margin) return true;
+  }
+  return false;
+}
+
 /* The kept ground in front of the house (P.clearKind, see buildParams): a
    strip along the wall out to P.clearD, its far edge straight for gravel and
    wandering for a lawn, a yard or a marsh bank. 1 inside, 0 beyond. The
@@ -9622,9 +9668,8 @@ function plantable(P, H, x, z, maxSlope) {
   if (P.erg && duneAt(P.dune, x, z) > P.dune.hd * 0.22) return false;
   if (maxSlope && slopeAt(H, x, z) > maxSlope) return false;
   if (P.clearKind && clearAt(P, x, z + 0.6) > 0) return false;
-  if (P.pathKind && onPathAt(P, x, z) > 0.55) return false;
   /* nothing grows up between the wheel ruts big enough to stop a tractor */
-  if (P.pathKind && P.pathGauge > 0.01 && pathOff(P, x, z) < P.pathGauge * 0.5 + P.pathW) return false;
+  if (pathBlocked(P, x, z, 0.55)) return false;
   return true;
 }
 
@@ -9740,6 +9785,8 @@ function buildProps(scene, P, R, U, H) {
     if (spec.kind === 'blocks') { buildBlocks(scene, P, R, U, H); continue; }
     if (spec.kind === 'bridge') { buildBridge(scene, P, R, U, H); continue; }
     if (spec.kind === 'rock') { buildRocks(scene, P, R, U, H, spec); continue; }
+    /* in town the hedges are the gardens' own (buildCityHouses) */
+    if (spec.kind === 'hedge' && cityPlan(P)) continue;
     if (spec.kind === 'hedge') {
       /* Hedgerows round the fields, square to the crop rows: these were bushes
          snapped onto the rows and stood in the crop like shrubs. The count
