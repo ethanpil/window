@@ -8235,7 +8235,7 @@ function buildCascadeFall(scene, P, R, U, H) {
          a power under one makes the threads quicken as they descend and
          cannot change their direction. */
       '  float x = vUv.x * 6.0 + sin(d * 5.0 + uTime * 0.3) * 0.4;',
-      '  float y = pow(d, 0.62) * uLen * 0.075;',
+      '  float y = pow(max(d, 0.0), 0.62) * uLen * 0.075;',
       '  float n1 = vn(vec2(x, y - uTime * 1.9));',
       '  float n2 = vn(vec2(x * 2.1 + 4.3, y * 2.3 - uTime * 4.6));',
       '  float n3 = vn(vec2(x * 4.4 + 9.7, y * 4.8 - uTime * 9.8));',
@@ -10319,7 +10319,7 @@ function buildFalls(scene, P, R, U, H) {
          they go; a puffy cloud texture read up it had made a dotted line.
          The fine streaks fade to their mean once narrower than a pixel. */
       '  float d = 1.0 - vUv.y;',
-      '  float along = pow(d, 0.7) * vLen * 0.09;',
+      '  float along = pow(max(d, 0.0), 0.7) * vLen * 0.09;',   /* pow of a negative is undefined */
       '  float x = vUv.x * vW * 0.9 + vSeed * 7.0;',
       '  float s1 = vnf(vec2(x, along - uTime * 2.2));',
       '  float s2 = vnf(vec2(x * 2.3 + 3.1, along * 1.9 - uTime * 4.1));',
