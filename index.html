@@ -2109,7 +2109,8 @@ function drawPropSprite(g, S, kind, P, R, opts) {
     var drx = S * R.range(0.40, 0.46), dry = S * R.range(0.62, 0.78);
     for (var bs = 0; bs < 110; bs++) {
       var ba2 = -Math.PI * R.f(), bd = Math.sqrt(R.f());
-      var bx3 = S / 2 + Math.cos(ba2) * bd * drx, by3 = S - Math.sin(ba2) * bd * dry * 0.95;
+      /* up from the foot: the angle runs below the horizontal */
+      var bx3 = S / 2 + Math.cos(ba2) * bd * drx, by3 = S - Math.abs(Math.sin(ba2)) * bd * dry * 0.95;
       leafSpray(g, bx3, by3, S * 0.05, bc.clone().multiplyScalar(0.62 + 0.38 * (S - by3) / dry), bl2, 9, S * 0.009, S * 0.016, R);
     }
     var bloom = P.seasonKey === 'spring' ? 1 : (P.seasonKey === 'summer' ? 0.35 : 0);
