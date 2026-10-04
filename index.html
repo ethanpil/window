@@ -2468,7 +2468,10 @@ var GLSL_COMMON = [
      64 m square in front, whose border is lit so it clamps to nothing. */
   'uniform sampler2D uNearMap; uniform vec4 uNearR;',
   'float bakedEdge(vec2 uv){ vec2 e = smoothstep(vec2(0.0), vec2(0.02), uv) * (1.0 - smoothstep(vec2(0.98), vec2(1.0), uv)); return e.x * e.y; }',
-  'float nearSun(vec2 xz){ return texture2D(uNearMap, (xz - uNearR.xy) * uNearR.zw).r; }',
+  /* mip-mapped (bakeNear), so its smaller levels' edge texels hold shadow
+     that clamping would smear outward: lit outside the square */
+  'float nearSun(vec2 xz){ vec2 uv = (xz - uNearR.xy) * uNearR.zw, q = step(vec2(0.0), uv) * step(uv, vec2(1.0));',
+  '  return mix(1.0, texture2D(uNearMap, uv).r, q.x * q.y); }',
   'vec2 bakedRG(vec2 xz){ vec2 uv = (xz - uShadowOrigin) * uShadowScale; vec2 v = texture2D(uShadowMap, uv).rg;',
   '  v = mix(vec2(1.0), v, bakedEdge(uv)); v.x = min(v.x, nearSun(xz)); return v; }',
   'float baked(vec2 xz){ return bakedRG(xz).x; }',
@@ -6114,7 +6117,12 @@ function bakeNear(H, sunDir) {
   var out = new Uint8Array(N * N * 4);
   for (k = 0; k < N * N; k++) { var v = Math.round(lit[k] * 255); out[k * 4] = v; out[k * 4 + 1] = v; out[k * 4 + 2] = v; out[k * 4 + 3] = 255; }
   var tex = new THREE.DataTexture(out, N, N, THREE.RGBAFormat);
-  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
+  /* Mip-mapped: further off a texel is smaller than a pixel and its thin
+     shadows would crawl. Seen at a grazing angle a plain mip blurs them
+     away across the view too; a little anisotropy keeps them. */
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter; tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = App.renderer ? Math.min(4, App.renderer.capabilities.getMaxAnisotropy()) : 1;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.flipY = false; tex.needsUpdate = true;
   var U = App.U;
