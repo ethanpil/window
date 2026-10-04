@@ -4523,7 +4523,8 @@ function buildGrass(scene, P, R, U, H) {
   } catch (e) { gImg = null; }
   var groundLum = function (x, z) {
     if (!gImg) return 1;
-    var u = x * 0.0052 + 0.31, v = z * 0.0052 + 0.31;
+    /* the shader's broad octave: turned, scaled and offset the same way */
+    var u = (x * 0.8269 - z * 0.5623) * 0.0052 + 0.31, v = (x * 0.5623 + z * 0.8269) * 0.0052 + 0.17;
     u -= Math.floor(u); v -= Math.floor(v);
     var o = ((Math.floor((1 - v) * gW) % gW) * gW + Math.floor(u * gW) % gW) * 4;
     return clamp((gImg[o] * 0.3 + gImg[o + 1] * 0.59 + gImg[o + 2] * 0.11) / gMean, 0.72, 1.3);
