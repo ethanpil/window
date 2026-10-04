@@ -8634,6 +8634,7 @@ function buildHerd(scene, P, R, U, H) {
   var smat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime, uCamPos: U.uCamPos, uSunDir: U.uSunDir, uShadow: U.uShadow,
+      uSunCol: U.uSunCol, uAmbCol: U.uAmbCol,
       uFogDensity: U.uFogDensity, uSpeed: { value: Hd.speed }
     },
     transparent: true, depthWrite: false,
@@ -8641,9 +8642,9 @@ function buildHerd(scene, P, R, U, H) {
     vertexShader: [
       'attribute vec3 iPos; attribute vec4 iAttr; attribute vec2 iGrad;',
       'uniform float uTime, uSpeed, uFogDensity, uShadow;',
-      'uniform vec3 uCamPos, uSunDir;',
+      'uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol;',
       'varying vec2 vUv; varying float vA;',
-      'float fogAmt(float d, float density){ float f = density * d; return 1.0 - exp(-f*f); }',
+      GLSL_COMMON,
       WANDER,
       'void main(){',
       '  float size = iAttr.x, ph = iAttr.y, rate = iAttr.z;',
@@ -8657,9 +8658,14 @@ function buildHerd(scene, P, R, U, H) {
       '  vec2 push = -sd.xz / max(sd.y, 0.35) * size * 0.18;',
       '  vec3 lp = right * position.x * size * 0.80 + toCam * position.z * size * 0.34;',
       '  vec3 p = wp + lp + vec3(push.x, 0.03, push.y);',
-      /* stronger in sunshine, still there as a darker patch under cloud */
+      '  p.y += dot(iGrad, lp.xz + push);',        /* lying on the slope */
+      /* Stronger in sunshine, still there as a darker patch under cloud: as
+         dark as the sun's share of the light on level ground there, which is
+         what the baked shadows round it show. */
+      '  float sunL = dot(uSunCol, vec3(0.30, 0.59, 0.11)) * max(sd.y, 0.0) * mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime));',
+      '  float share = sunL / (sunL + dot(uAmbCol, vec3(0.30, 0.59, 0.11)) + 1e-3);',
       '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  vA = mix(0.20, 0.45, smoothstep(0.0, 0.2, sd.y) * (1.0 - uShadow)) * (1.0 - fogAmt(-mv.z, uFogDensity));',
+      '  vA = mix(0.20, 0.45, smoothstep(0.05, 0.55, share)) * (1.0 - fogAmtH(-mv.z, uFogDensity, p.y));',
       '  vUv = uv;',
       '  gl_Position = projectionMatrix * mv;',
       '}'
