@@ -10264,9 +10264,15 @@ function buildFalls(scene, P, R, U, H) {
     if (line.length < 3) line = [[pk[0], top + 1.2, pk[1]], [pk[0], top - pk[3] * 0.5, pk[1]], [pk[0], top - pk[3], pk[1]]];
     var drop = line[0][1] - line[line.length - 1][1];
     var start = pos.length / 3;
+    /* the edges are set out here, across the line of sight from the window,
+       and each sits on the ground under it: set out in the shader at the
+       middle's height, they went into any wall that curved round the fall */
+    var rx = -uz, rz = ux;
     for (var k = 0; k < line.length; k++) {
+      var dnk = k / (line.length - 1), hw = 0.5 * pk[4] * (1 + dnk * 0.5 + smoothstep(0.82, 1.0, dnk) * 1.6);
       for (var e = -1; e <= 1; e += 2) {
-        pos.push(line[k][0], line[k][1], line[k][2]);
+        var ex = line[k][0] + rx * e * hw, ez = line[k][2] + rz * e * hw;
+        pos.push(ex, Math.max(line[k][1] - 0.6, H(ex, ez) + 0.6), ez);
         side.push(e); along.push(k / (line.length - 1));
         seeds.push(seedsR[i]); wids.push(pk[4]); lens.push(Math.max(drop, 10));
       }
@@ -10286,27 +10292,26 @@ function buildFalls(scene, P, R, U, H) {
   geo.setIndex(idx);
   var mat = new THREE.ShaderMaterial({
     uniforms: {
-      uTime: U.uTime, uCamPos: U.uCamPos, uFogCol: U.uFogCol,
+      uTime: U.uTime, uFogCol: U.uFogCol,
       uFogDensity: U.uFogDensity, uHazeK: U.uHazeK, uAmbCol: U.uAmbCol, uSunCol: U.uSunCol, uSunDir: U.uSunDir,
       uMap: { value: makeCloudTexture(R.int(1, 99999)) }
     },
     extensions: { derivatives: true },
-    /* it rides a metre clear of the rock, and is drawn toward the eye in depth
-       as the cascade is, so the face it lies on does not cut it into bands */
-    polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -16,
+    /* it rides clear of the rock, edges and all; a nudge toward the eye in
+       depth keeps the face it lies on from cutting it into bands far off */
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
     vertexShader: [
       'attribute float aSide, aAlong, aSeed, aWidth, aLen;',
-      'uniform vec3 uCamPos, uFogCol, uSunDir, uSunCol; uniform float uFogDensity;',
+      'uniform vec3 uFogCol, uSunDir, uSunCol; uniform float uFogDensity;',
       'varying vec2 vUv; varying float vFog; varying float vLen, vSeed, vW; varying vec3 vHaze;',
       GLSL_COMMON,
       'void main(){',
-      '  vec3 toCam = normalize(vec3(uCamPos.x - position.x, 0.0, uCamPos.z - position.z));',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      /* it spreads as it falls, and billows out into spray at the foot */
+      /* it spreads as it falls, and billows out into spray at the foot
+         (the edges are set out in the script) */
       '  float dn = aAlong;',
       '  float spread = 1.0 + dn * 0.5 + smoothstep(0.82, 1.0, dn) * 1.6;',
-      '  vec3 wp = position + right * aSide * 0.5 * aWidth * spread;',
+      '  vec3 wp = position;',
       '  vUv = vec2(aSide * 0.5 + 0.5, 1.0 - aAlong); vLen = aLen; vSeed = aSeed; vW = aWidth * spread;',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
