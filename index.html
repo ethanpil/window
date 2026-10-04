@@ -7596,10 +7596,10 @@ function buildBridge(scene, P, R, U, H) {
    unit vector in the ground plane), o.len long, one lane at each offset in
    o.lanes across it (a positive offset runs with o.dir, a negative one
    against it). Speeds are in metres a second, one per lane, so cars in a
-   lane never run through each other. o.parked: offsets of kerbside lanes of
-   parked cars, o.parkLen of them along the middle of the road, nose to tail
-   six to eight metres apart with gaps, none across a junction (o.skip(along)
-   says where one is). A car is two boxes, a body and a glazed cabin set in
+   lane never run through each other. o.parked: the kerb lines (signed) that
+   parked cars line, o.parkLen of them along the middle of the road, nose to
+   tail with gaps, none where o.skip(along, length) says (junctions and their
+   crossings). A car is two boxes, a body and a glazed cabin set in
    on it; a lorry a cab and a box; and a dark patch under each for the
    shadow it stands in. */
 function buildTraffic(scene, P, R, U, o) {
@@ -7611,11 +7611,18 @@ function buildTraffic(scene, P, R, U, o) {
     for (var i = 0; i < perLane; i++)
       cars.push([o.lanes[L], o.lanes[L] >= 0 ? 1 : -1, laneSpeed, (i + R.range(-0.35, 0.35)) / perLane]);
   }
+  /* parked vehicles bumper to bumper down a kerb (o.parked: the kerb lines,
+     signed): each one sized before it is placed, so a lorry takes the room of
+     a lorry, and none where o.skip(centre, length) says no */
   var parked = o.parked || [];
   for (var pk = 0; pk < parked.length; pk++) {
-    for (var a = -o.parkLen * 0.5; a < o.parkLen * 0.5; a += R.range(6, 8)) {
-      if (R.f() < 0.35 || (o.skip && o.skip(a))) continue;
-      cars.push([parked[pk], parked[pk] >= 0 ? 1 : -1, 0, a / o.len + 0.5]);
+    for (var a = -o.parkLen * 0.5; ;) {
+      var pTruck = R.f() < 0.05, pLen = pTruck ? R.range(7, 11) : R.range(3.9, 4.9);
+      var at = a + pLen * 0.5;
+      a += pLen + R.range(1.0, 2.6);
+      if (a > o.parkLen * 0.5) break;
+      if (R.f() < 0.35 || (o.skip && o.skip(at, pLen))) continue;
+      cars.push([parked[pk], parked[pk] >= 0 ? 1 : -1, 0, at / o.len + 0.5, pTruck, pLen]);
     }
   }
   var N = cars.length;
@@ -7639,14 +7646,15 @@ function buildTraffic(scene, P, R, U, o) {
   var iAttr = new Float32Array(N * 4), iCol = new Float32Array(N * 3), iLane = new Float32Array(N * 4);
   var carCols = ['#c8ccd0', '#2f3438', '#8d2f2a', '#2c4a72', '#c9a23a', '#3e6b46', '#d8d2c4', '#6a6d70', '#1d1f22', '#e8e6e0', '#5b6168'];
   for (var m = 0; m < N; m++) {
-    var truck = R.f() < (cars[m][2] > 0 ? 0.16 : 0.05);
-    iAttr[m * 4] = truck ? R.range(7, 11) : R.range(3.9, 4.9);       /* length */
+    var pc = cars[m].length > 4, truck = pc ? cars[m][4] : R.f() < 0.16;
+    iAttr[m * 4] = pc ? cars[m][5] : truck ? R.range(7, 11) : R.range(3.9, 4.9); /* length */
     iAttr[m * 4 + 1] = truck ? R.range(2.6, 3.4) : R.range(1.4, 1.6); /* height */
     iAttr[m * 4 + 2] = truck ? R.range(2.4, 2.55) : R.range(1.75, 1.95); /* width */
     iAttr[m * 4 + 3] = cars[m][3];                                      /* start along the line */
     var c = new THREE.Color(truck ? R.pick(['#d8d2c4', '#8d8f92', '#2f3438', '#e6e4de']) : R.pick(carCols));
     iCol[m * 3] = c.r; iCol[m * 3 + 1] = c.g; iCol[m * 3 + 2] = c.b;
-    iLane[m * 4] = cars[m][0];
+    /* a parked one keeps a hand's width off the kerb */
+    iLane[m * 4] = pc ? cars[m][0] - cars[m][1] * (0.3 + iAttr[m * 4 + 2] * 0.5) : cars[m][0];
     iLane[m * 4 + 1] = cars[m][1];                                      /* which way it faces */
     iLane[m * 4 + 2] = cars[m][2];                                      /* metres a second */
     iLane[m * 4 + 3] = truck ? 1 : 0;
@@ -7905,9 +7913,13 @@ function cityStreets(scene, P, R, U, H, C, opt) {
   }
   /* traffic */
   var streets = opt.traffic || [];
-  var mv = C.sw * 0.5 - C.sk - 2.2, wide = C.sw - 2 * C.sk >= 12;
-  var lanesM = wide ? [mv * 0.25, mv * 0.75, -mv * 0.25, -mv * 0.75] : [mv * 0.5, -mv * 0.5];
-  var park = C.sw * 0.5 - C.sk - 1.1;
+  /* the lanes the ground paints (see buildTerrain): a road rw wide, one lane
+     each way, or two once it is 12 m. Traffic keeps to the middle of its
+     lane. A wide road parks down both kerbs and drives in its inner lanes; a
+     narrow one has no room to park beside a lane that is driven. */
+  var rw = C.sw - 2 * C.sk, wide = rw >= 12;
+  var lanesM = wide ? [rw / 8, -rw / 8] : [rw / 4, -rw / 4];
+  var parkM = wide ? [rw * 0.5, -rw * 0.5] : [];
   for (var si = 0; si < streets.length; si++) {
     var s = streets[si], ax = s[0], ln = (s[1] + 0.5) * C.pitch;
     /* the road's own frame: along it from a point level with the window */
@@ -7917,12 +7929,14 @@ function cityStreets(scene, P, R, U, H, C, opt) {
     buildTraffic(scene, P, SR, U, {
       x: o0[0], y: oy, z: o0[1], len: opt.len, dir: dir,
       lanes: lanesM, spacing: SR.range(60, 130) / Math.sqrt(Math.max(P.trafficRate || 1, 0.5)), rate: P.trafficRate || 1, speed: [11, 14],
-      parked: [park, -park], parkLen: opt.parkLen,
+      parked: parkM, parkLen: opt.parkLen,
+      /* no part of a parked vehicle within 6.5 m of the block's end: the
+         zebra and the stop line lie there (see buildTerrain) */
       skip: (function (s2) {
-        return function (a) {
+        return function (a, len) {
           var at = a + s2;              /* along, in the grid frame */
           var ib = at - Math.round(at / C.pitch) * C.pitch;
-          return Math.abs(ib) > C.bw * 0.5 - 3;
+          return Math.abs(ib) + len * 0.5 > C.bw * 0.5 - 6.5;
         };
       })(-s[2])
     });
