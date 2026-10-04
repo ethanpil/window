@@ -6136,9 +6136,10 @@ function bakeStatic(P, H, N, sx, sz) {
   /* A city's buildings are solid boxes, not crowns: raise each footprint to
      its roof in a copy of the heights, and the march shades the street from
      them exactly as it does from a hill. */
-  var boxes = App._boxes || [], hc = hg, city = boxes.length > 0;
+  var boxes = App._boxes || [], hc = hg, city = boxes.length > 0, foot = null;
   if (city) {
     hc = new Float32Array(hg);
+    foot = new Uint8Array(N * N);       /* 1 inside a footprint */
     for (k = 0; k < boxes.length; k++) {
       var bb = boxes[k], bc = Math.cos(bb[4]), bs = Math.sin(bb[4]);
       var ext = Math.abs(bc) * bb[2] + Math.abs(bs) * bb[3], ezt = Math.abs(bs) * bb[2] + Math.abs(bc) * bb[3];
@@ -6146,7 +6147,10 @@ function bakeStatic(P, H, N, sx, sz) {
       var bj0 = Math.max(0, Math.floor((bb[1] - ezt - SHADOW.z0) / sz)), bj1 = Math.min(N - 1, Math.floor((bb[1] + ezt - SHADOW.z0) / sz));
       for (j = bj0; j <= bj1; j++) for (i = bi0; i <= bi1; i++) {
         var ox = SHADOW.x0 + (i + 0.5) * sx - bb[0], oz = SHADOW.z0 + (j + 0.5) * sz - bb[1];
-        if (Math.abs(ox * bc + oz * bs) <= bb[2] && Math.abs(-ox * bs + oz * bc) <= bb[3] && hc[j * N + i] < bb[5]) hc[j * N + i] = bb[5];
+        if (Math.abs(ox * bc + oz * bs) <= bb[2] && Math.abs(-ox * bs + oz * bc) <= bb[3]) {
+          foot[j * N + i] = 1;
+          if (hc[j * N + i] < bb[5]) hc[j * N + i] = bb[5];
+        }
       }
     }
   }
@@ -6159,7 +6163,7 @@ function bakeStatic(P, H, N, sx, sz) {
     wd[k] = P.waterY == null ? 255 : Math.round(Math.sqrt(clamp((P.waterY - hg[k]) / 8, 0, 1)) * 255);
     if (hc[k] > maxTop) maxTop = hc[k];
   }
-  return { N: N, hc: hc, city: city, wd: wd, maxTop: maxTop };
+  return { N: N, hc: hc, city: city, foot: foot, wd: wd, maxTop: maxTop };
 }
 function bakeShadows(P, H, sunDir) {
   if (App._casters && App._casters.length) bakeNear(H, sunDir);
@@ -6170,7 +6174,7 @@ function bakeShadows(P, H, sunDir) {
      once per world, like the AO: a rebake as the sun moves only marches. */
   var BK = App._bake;
   if (!BK || BK.N !== N) BK = App._bake = bakeStatic(P, H, N, sx, sz);
-  var hc = BK.hc, city = BK.city, wd = BK.wd, maxTop = BK.maxTop;
+  var hc = BK.hc, city = BK.city, foot = BK.foot, wd = BK.wd, maxTop = BK.maxTop;
   var lit = new Float32Array(N * N);
   /* For a city, also how high the shadow reaches up each column (the walls
      read it): the highest of each occluder's top less the ray's climb to it.
@@ -6246,14 +6250,17 @@ function bakeShadows(P, H, sunDir) {
     return x <= NEAR.x0 || x >= NEAR.x1 || z <= NEAR.z0 || z >= NEAR.z1 ? 1 : 0;
   });
   /* the box footprints are whole texels, so the shadow's edge up a wall
-     or across a roof came out in stairs: soften the heights once */
+     or across a roof came out in stairs: soften the heights once. A street
+     texel only from the street round it and a roof from the roof: the roof's
+     own height averaged into the street beside it read as a shadow metres
+     up the foot of every sunlit wall. */
   if (city) {
     var hb = new Float32Array(N * N);
     for (j = 0; j < N; j++) for (i = 0; i < N; i++) {
-      var hacc = 0, hn = 0;
+      var hacc = 0, hn = 0, f0 = foot[j * N + i];
       for (var hj = -1; hj <= 1; hj++) for (var hi2 = -1; hi2 <= 1; hi2++) {
         var ha = i + hi2, hbb = j + hj;
-        if (ha < 0 || hbb < 0 || ha >= N || hbb >= N) continue;
+        if (ha < 0 || hbb < 0 || ha >= N || hbb >= N || foot[hbb * N + ha] !== f0) continue;
         hacc += hsh[hbb * N + ha]; hn++;
       }
       hb[j * N + i] = hacc / hn;
