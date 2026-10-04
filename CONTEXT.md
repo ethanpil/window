@@ -2,9 +2,10 @@
 
 A procedural window onto a landscape. One HTML file, no build step, no assets,
 no dependencies beyond Three.js r128 from a CDN. Every seed produces a different
-place, and the same seed always produces the same place.
+place, and the same seed always produces the same place — at any window size
+and any detail tier.
 
-- **Deliverable:** `window.html` (~418 KB, one file)
+- **Deliverable:** `index.html` (~680 KB, one file)
 - **Runtime:** any browser with WebGL2 (it degrades on WebGL1 — see §5)
 - **Nothing is fetched but the page and Three.js.** Every texture is drawn on a
   `<canvas>` at build time; every sound is synthesised from noise buffers.
@@ -13,72 +14,58 @@ place, and the same seed always produces the same place.
 
 ## 1. Working on it
 
-Open `window.html` in a browser. That is the whole story for running it.
+Open `index.html` in a browser. That is the whole story for running it.
 
-For development there is a Node harness that loads the page's script into a
-mocked DOM/WebGL environment, so a world can be built and inspected without a
-browser.
+### Checking a change
 
-```
-python3 -c "import re; s=open('window.html').read(); \
-  open('app.js','w').write(re.findall(r'<script>(.*?)</script>', s, re.S)[-1])"
-node --check app.js
-node freevars.js
-```
-
-> **Edit `window.html`. Never edit `app.js`.** `app.js` is a throwaway extraction
-> used only by the checkers, and it is overwritten every time you re-extract.
-
-### The harness
-
-`harness.js` builds a fake `window`, `document` and WebGL renderer, `eval`s the
-extracted script, and publishes the internals on `global.__T`. `harness_setup.js`
-is the same file truncated before its own test body, so other scripts can
-`require('./harness_setup.js')` and get `global.__T`.
-
-To poke at something new from a test, **add it to the `global.__T = { … }` object
-at the bottom of `harness.js`**, then regenerate the setup copy:
+There is **no test harness in this repository.** The Node harness and the
+`*_test.js` suite earlier versions of this file described lived outside it and
+are gone. What works now is a real browser, driven headless:
 
 ```
-python3 -c "s=open('harness.js').read(); \
-  open('harness_setup.js','w').write(s[:s.index('const seeds = [];')])"
+# 1. syntax: extract the last <script> and check it
+node -e "const s=require('fs').readFileSync('index.html','utf8'); \
+  const m=[...s.matchAll(/<script>([\s\S]*?)<\/script>/g)]; \
+  require('fs').writeFileSync('app.js', m[m.length-1][1])" && node --check app.js
 ```
 
-`harness_srcdoc.js` is the same with `history`/`location` throwing, to prove the
-page survives a sandboxed iframe.
+2. **Every landscape loads clean.** Serve the folder on localhost and drive
+   Edge or Chromium with `playwright-core` (`--use-angle=d3d11
+   --ignore-gpu-blocklist` on Windows, so it uses the GPU). For each biome load
+   `?seed=8badf00d@b=<biome>,t=afternoon,w=clear,v=bare`, wait for
+   `#curtain.gone`, then fail on any `pageerror`, console error/warning, or
+   text in the error strip `#err`. Screenshot and **look**. Repeat with
+   `t=night,w=rainstorm,v=bare`, `t=golden,w=fair` (framed) and
+   `s=winter,w=snowfall,v=bare`, and a second seed.
+3. **Reshuffle keeps identity.** For ~30 seeds compare the scene description
+   (`#note`, with metre values masked) for `seed` and `seed#3` (URL-encode the
+   `#`). Must match every time.
+4. **WebGL1.** The same load loop with `--disable-webgl2`: no new errors. (A
+   96×96 texture-resize warning is expected.)
+5. **Lint** (optional): ESLint 8 with `no-undef`, `no-redeclare`,
+   `no-unused-vars`, `no-shadow` over `app.js`. Most `no-shadow` hits are
+   benign; an unused variable usually is dead code.
 
-`audio_mock.js` is a fake `AudioContext` that records the node graph, so the
-sound engine can be tested without audio hardware.
+To read internals from a test, serve a copy with `var App = {};` replaced by
+`var App = window.__App = {};` and evaluate against it.
 
-### The test suite
+> **Edit `index.html`. Never edit `app.js`** — it is a throwaway extraction.
 
-Run all of it before shipping. Almost every one of these exists because a bug got
-past me; §7 says which.
+### Invariants worth checking by hand
 
-| script | what it protects |
-|---|---|
-| `new_test.js` | builds 900 worlds across every landscape; catches exceptions and non-finite uniforms |
-| `nan_test.js` | 66,000 height samples must all be finite |
-| `lrsync_test.js` | reshuffling must not change the scene's identity — must read 500/500 |
-| `visible_test.js` | every declared feature must lie inside the window's view cone |
-| `partial_test.js` | no instance buffer half-filled with garbage at the origin |
-| `texcheck.js` | every texture wraps something WebGL can upload |
-| `dup_test.js` | no world builder called twice per build |
-| `dupdef_test.js` | no top-level name defined twice (dead code masquerading as live) |
-| `shadow_test.js` | no `var` that shadows an outer name and is read before it |
-| `freevars.js` | no undeclared identifiers |
-| `reserved_scan.js` | no GLSL reserved word used as an identifier |
-| `extract_shaders.js` + `glslangValidator` | every shader compiles |
-| `sandbox_test.js` | boots where `history`/`location` throw |
-| `leak_test.js` | repeated builds don't grow the object count |
-| `sound_test.js` | the Web Audio graph builds without errors |
-| `shuffle_test.js` | layout changes on reshuffle, identity does not |
-| `hud_test.js` | no control label overflows its reserved width |
-| `ui_test.js`, `feat_test.js`, `season_test.js`, `prefs_test.js` | older feature-level checks |
+These were each a shipped bug (§7 says which):
 
-`extract_shaders.js` inserts `#extension GL_OES_standard_derivatives : enable`
-after `#version` for any fragment shader using `fwidth`, because `glslangValidator`
-at `#version 100` needs it and three adds it itself at runtime.
+- no non-finite heights or uniforms in any landscape;
+- every declared feature (`App._features`) inside the view;
+- instance buffers filled, or `instanceCount` set to what was filled;
+- every texture wraps a canvas or typed array, never a `THREE.Color`;
+- no top-level function defined twice (the last one silently wins);
+- no `var` read before a same-named redeclaration hoists over it;
+- no GLSL identifier on ANGLE's reserved list (`patch`, `sample`, `filter`, …);
+- no `texture2D` inside a per-pixel branch;
+- repeated builds don't grow the scene's object count;
+- the same seed gives the same `App.t`, wetness and placements at 1600×900 and
+  2560×1080, and on every detail tier.
 
 ### Debugging in the browser
 
@@ -97,12 +84,12 @@ One IIFE in thirteen numbered sections. The numbering is in the source; keep it.
 ```
  1. seeded randomness      RNG, layoutRng, noise (fbm2, ridged, tileFBM, vnoise)
  2. seeds                  seedHex, randomSeed, parseSeed, seedString, scene codes
- 3. palettes & presets     22 palettes, WEATHERS, SEASONS, TIMES, BIOMES,
-                           WINDOW_TYPES, FINISHES, FLOWERS, WIND_NAMES
+ 3. palettes & presets     palettes, WEATHERS, SEASONS, TIMES, BIOMES (with traits),
+                           WINDOW_TYPES, FINISHES, FLOWERS, WIND_NAMES, tintPalette
  4. seed → world params    buildParams: the whole pure-data description
  5. canvas texture factories   every texture, drawn with 2D canvas calls
- 6. shared GLSL            GLSL_COMMON, GLSL_TONE — strings pasted into shaders
- 7. the world              every builder
+ 6. shared GLSL            GLSL_TONE, GLSL_HORIZON, GLSL_COMMON
+ 7. the world              every builder, the shadow bakes
  8. layout / framing       window geometry, camera, resize, post-processing
  9. weather over time      updateWeather: drives every uniform from the clock
 10. 2D overlay             the canvas above the WebGL view
@@ -119,33 +106,37 @@ seed string
    ↓  buildParams(P)     →  pure data: biome, weather, colours, counts,
    ↓                        terrain parameters. No Three.js objects.
    ↓  buildWorld
-       ├─ clearWorld / disposeDeep
+       ├─ clearWorld / disposeDeep, applyView, sizeWindow
        ├─ makeHeightField(P)  → H(x,z), the analytic ground
        ├─ buildTerrain        → the mesh, and App.Hm, a sampler of the DRAWN mesh
        ├─ H = App.Hm          ← everything after this uses the drawn surface
-       ├─ …21 more builders
-       ├─ bakeShadows         → a texture every lit shader reads
-       └─ writeSeedToUrl
+       ├─ …the other builders
+       ├─ shareCommon         → hands GLSL_COMMON's uniforms to every material
+       ├─ App.t, App.wetness  ← from their own streams, before the bake
+       ├─ updateWeather(App.t), bakeShadows → applyShadowMap
+       └─ writeSeedToUrl, layout, updateHUD
    ↓  updateWeather(t)   →  drives all shared uniforms each frame
-   ↓  loop               →  renderFrame
+   ↓  loop               →  renderFrame (rebakes when the sun moves > 7.5°)
 ```
 
 **`buildParams` is pure.** Same seed, same object, no outside state touched. This
-is what makes scene codes reproducible. Keep it that way.
+is what makes scene codes reproducible. Keep it that way. Anything per-world that
+the frame would otherwise recompute (`P.dryClear`, `P.mirageK`) is settled here.
 
-**Builder order in `buildWorld`** (order matters — later builders read `App._shadows`
-and `App.Hm`):
+**Builder order in `buildWorld`** (order matters — later builders read
+`App._shadows`, `App._boxes` and `App.Hm`):
 
 ```
-clearWorld, applyView, sizeWindow, buildSky, buildTerrain, buildWater,
-buildGrass, buildFlowers, buildProps, buildClutter, buildCritters,
-buildLandmark, buildBoundaries, buildHerd, buildWaterLife, buildRidges,
-buildFlyers, buildMotes, buildDust, buildFalls, buildBirds, buildVisitors,
-buildPrecip, buildRoom, updateWeather, applyShadowMap, writeSeedToUrl,
-layout, updateHUD
+buildSky, buildTerrain, buildWater, buildGrass, buildFlowers,
+buildProps (→ city, blocks, bridge, rocks, cacti, walls, near trees,
+            hedgerows, telegraph poles…), buildClutter, buildCritters,
+buildLandmark, [oasis camp], [buildCascadeFall], buildBoundaries,
+buildTerraceWall, buildHerd, buildWaterLife, buildRidges, buildFlyers,
+buildMotes, buildDust, buildFalls, buildBirds, buildVisitors, buildPrecip,
+buildRoom, lights, shareCommon
 ```
 
-### Two random streams — the subtlest thing here
+### Random streams — the subtlest thing here
 
 A seed can carry a *layout nonce* (`a1b2c3d4#3`). Reshuffling increments it: it
 rearranges **where** things are without changing **what place this is**.
@@ -170,11 +161,34 @@ Consuming from `R` on every layout draw is what keeps identity aligned.
 > ```
 >
 > Loops are the same trap — iterate a fixed maximum and `continue` past the ones
-> you don't need. `lrsync_test.js` must read 500/500.
+> you don't need. A draw whose value is no longer used stays, with a comment
+> (the canyon's old step count, its old river level).
 
-Other seeded streams, each independent so they don't shift each other:
-`base + '/build'` (world building), `/ground/n` (ground textures), `/room`,
-`/frost`, `/layout/n`.
+Every other stream is independent, so no feature's draws move another's:
+
+| key | kind | used for |
+|---|---|---|
+| `/build` + nonce | builder | the shared builder stream `R` builders receive |
+| `/build/<feature>` + nonce | builder sub-stream | grass, cacti, talus, near trees, houses, gardens, streets, bridge, walls, hedges, hedgerows, terrace wall, treeline, scatter, band, oasis, riparian, poles, night critters, presets |
+| `/<feature>` + nonce | layout, outside `LR` | `/path`, `/canyon`, `/cliff`, `/terrace`, `/valley`, `/dunes`, `/city` |
+| `/<feature>` | identity | `/landmark` (presence, kind, size), `/strata`, `/desert`, `/road`, `/cityair`, `/eye`, `/sprite/<kind>/<v>`, `/clutter/<kind>`, `/ground/n`, `/room`, `/frost`, `/fx` |
+| `/clock` + nonce | clock | `App.t` (unless a scene code pins it) |
+| `/wet` | identity | whether the ground is still wet from rain |
+
+**New randomness in a builder takes a sub-stream of its own**, never more draws
+from `R`. Identity choices (what kind of thing) take an identity stream; where it
+goes takes a layout one.
+
+The clock moves on a reshuffle (another look at the same place); wet ground does
+not (it is the place's weather). Neither depends on any builder's draw count, so
+a builder change can no longer shift the scene's hour. A scene code's `pendingT`
+replaces the clock draw without touching the wetness.
+
+> **Builder-stream draw counts must not depend on the window or the tier.**
+> Scatter angles come from a fixed 16:9 wedge (`BUILD_ASPECT`), features from a
+> fixed 9:16 one (`FEATURE_ASPECT`), never the live window; counts that scale
+> with the detail tier draw from their own sub-streams; heights never read the
+> tier's grid (`terrainCellAt` is sized for the coarsest).
 
 ### Seeds, locks and scene codes
 
@@ -206,8 +220,8 @@ URL-safe unescaped. `?code=…` is read on load and rewritten as the scene runs
 |---|---|---|
 | version | 4 | currently 2; a decoder refuses anything higher |
 | layout nonce | 8 | |
-| biome | 6 | 64 slots, 28 used |
-| weather | 5 | 32 slots, 10 used |
+| biome | 6 | index into the **sorted** BIOMES keys; 27 used |
+| weather | 5 | index into the sorted WEATHERS keys; 10 used |
 | time | 3 | 7 used |
 | window type | 5 | 32 slots, 9 used |
 | finish | 5 | 32 slots, 10 used |
@@ -216,12 +230,15 @@ URL-safe unescaped. `?code=…` is read on load and rewritten as the scene runs
 | night off | 1 | |
 | detail tier | 3 | 4 = auto |
 | panes | 1 | |
-| clock | 16 | seconds |
+| clock | 16 | whole seconds |
 | reserved | 16 | |
 
-New landscapes take the next biome index. New settings take reserved bits. If
-something doesn't fit, bump `CODE_VERSION` and append a third `-` segment — old
-codes still decode, because a decoder reads only what its version defines.
+> Biome and weather indices are positions in **alphabetically sorted** keys
+> (`CODE_LISTS`), so adding or removing a landscape renumbers every one after
+> it and old codes decode to the wrong place. Bump `CODE_VERSION` and keep the
+> old order for old versions, or switch to an append-only list, when that
+> matters. New settings take reserved bits; if something doesn't fit, bump
+> `CODE_VERSION` and append a third `-` segment.
 
 Viewer preferences are deliberately **not** in the code. They describe you, not
 the scene.
@@ -230,55 +247,87 @@ the scene.
 
 ## 3. Content inventory
 
-**28 landscapes:** meadow, coast, desert, alpine, savanna, lavender, penthouse,
+**27 landscapes:** meadow, coast, desert, alpine, savanna, lavender, penthouse,
 bridge, hayfield, cascade, canyon, oasis, lakefront, river, flowerfield, marsh,
-cliffcoast, terraces, orchard, autumn, moor, tundra, saltflat, bamboo, blossom,
+cliffcoast, terraces, orchard, autumn, moor, tundra, saltflat, blossom,
 farmland, urban, fjord.
 
-**18 terrain kinds** (`makeHeightField`): rolling, beach, dunes, alpine, fjord,
-lake, river, marsh, cliff, terrace, slope, salt, urban, gorge, canyon, cascade,
-oasis, skyline. Each returns a closure `H(x, z)`.
+**Biome traits** on each BIOMES entry: `ground: 'sand'` (coast, desert, canyon,
+saltflat, oasis — no season tint on the ground, no puddles, gravel clutter, a
+sand-coloured bounce), `dryAir` (desert, canyon, saltflat, oasis, savanna — clear
+deep-blue air on a fine day, dust only in wind; with sand ground, varnished rock
+and mesa ridges), `farmed` (fields and hedge lines drawn into the far ground),
+`mirage` (desert, saltflat). Read the trait; never list biomes again.
+
+**Terrain kinds** (`makeHeightField`): rolling, beach, dunes (an erg of
+transverse dunes with a dry wash, or a bajada with mesas), alpine, fjord, lake,
+river, marsh, cliff, terrace, slope, salt, urban, gorge, canyon (cut bed by bed
+from one strata table), cascade, oasis, skyline. Each returns a closure `H(x, z)`.
 
 **10 weathers:** clear, fair, breezy, overcast, mist, drizzle, rainstorm, storm
-(thunder and lightning), snowfall, snowstorm.
+(thunder and lightning), snowfall, snowstorm. Rain leaves the ground wet (`uWet`:
+darker albedo, a sky sheen, puddles on level soil); it dries by the clock.
 
 **7 times:** night, dawn, morning, midday, afternoon, golden, dusk.
-**4 seasons.** `NO_WINTER` marks the tropics, the oasis and the canyon.
+**4 seasons.** `NO_WINTER` marks the tropics, the deserts and the terraces.
 
-**9 window types:** georgian sash, cottage sash, steel casement, crittall grid,
-picture window, arched casement, chapel arch, farmhouse light, garden door.
-**10 finishes:** painted white, old cream, sage green, dove grey, powder blue,
-black steel, dark bronze, walnut, weathered oak, oxblood.
+**9 window types**, **10 finishes**, **three view modes** (window, window open,
+bare). An eye may sit on an upper floor; at ground level the near ground is kept
+(a mown lawn, gravel behind a low wall, a bare yard, a marsh bank).
 
-**Three view modes:** window (closed), window open (the sash swings on its hinge
-and the sound opens up), and bare (no frame at all).
+**The city** (urban skyline and penthouse): a street grid (`cityPlan`) of blocks
+cut into lots, built to the pavement as podiums and towers with setbacks, crowns
+and spires, in facade families (glass curtain wall, brick, precast, stone, plant
+room) with storeys and bays that fit; painted streets with lanes, crossings, stop
+lines, kerbs and lamp pools; moving traffic in its lanes, parked cars and lorries,
+street trees, lamps, red obstacle lights on tall roofs, a power-station chimney.
+The skyline's front is a park, a neighbourhood of real houses with garden hedges,
+or a river.
 
-**Life:** herds (sheep, cattle, goats, deer, camels), flyers (butterflies, bees,
-dragonflies, fireflies, small birds), critters (lizards, scorpions), water life
-(ducks, herons, a moored boat), visitors that cross over minutes (a balloon, a
-boat, deer, geese), and birds overhead.
+**Country:** paths with their own frame (footpath, tramlines, two-rut track, dry
+wash, metalled lane with telegraph poles and wires); hedges as continuous banks
+of leaves; drystone walls from four templates; post-and-rail; shelter belts;
+woods and copses; treelines as woods; field parcels in the far ground.
 
-**Landmarks:** lighthouse, windmill, tower, barn, silo, cabin, pagoda, water
-tank, jetty. Barns and cabins smoke; lighthouses sweep a beacon.
+**Desert:** saguaros built in metres (spears to many-armed), creosote, brittlebush,
+cacti, varnished jointed rock, talus fans, a salt pan of raised polygons, a
+mirage band on the flats. The canyon's river is painted down its floor channel
+(no `P.waterY`).
 
-**Field boundaries:** hedge, drystone wall, post-and-rail fence, shelter belt.
+**Life:** herds (sheep, cattle, goats, deer, camels) with hooves on the ground
+and shadows; flyers (butterflies, bees, dragonflies, fireflies, small birds);
+critters (lizards by day, scorpions by night, each fading with the sky's night
+term); water life (ducks, herons, a moored boat); visitors (a balloon, a boat,
+deer, geese); birds overhead.
+
+**Landmarks:** lighthouse, windmill, tower, barn, house, smokestack, silo, cabin,
+pagoda, water tank, jetty — with facade grain (boards, logs, render, stone,
+brick, corrugated sheet), windows and a door. **Bridges:** suspension, steel
+arch, girder, stone, with tarmac, lines, railings and lamps.
 
 ---
 
 ## 4. The scene graph
 
-Everything is instanced. A typical world is **20–34 draw calls** and up to 56,000
-instances.
+Everything is instanced: one mesh per kind, many instances.
 
 ### Shared uniforms
 
 `App.U` holds the uniforms every material shares **by reference**: time, sun
-direction and colour, ambient, fog, wind, gust, snow, shadow map, haze factor,
-camera position. `updateWeather` writes them once per frame and the whole scene
-follows. Add to `App.U` rather than creating parallel state.
+direction and colour, ambient, fog (`uFogCol`, `uFogDensity`, `uFogShape`,
+`uFogH`, `uFogAway`, `uInScat`), ground bounce (`uGroundCol`), wind, gust, snow,
+wetness, mirage, cloud shift, the shadow and near maps, camera position.
+`updateWeather` writes them once per frame and the whole scene follows. Add to
+`App.U` rather than creating parallel state.
 
-`App.skyU` is the sky's own set (zenith, horizon, cloud cover, night, moon phase,
-rainbow strength).
+`App.skyU` is the sky's own set (zenith, horizon and `uHorizonAway`, cloud
+texture and cover, night, moon phase, rainbow).
+
+**`shareCommon(scene)`** runs once the world is built: every ShaderMaterial gets
+the uniforms GLSL_COMMON declares (fog shape, in-scatter, ground colour, wetness,
+sky cloud mapping, near map) unless it carries its own. A uniform a material does
+not carry reads as zero — this is why a material that includes GLSL_COMMON
+doesn't list them.
 
 ### The two height functions
 
@@ -292,32 +341,50 @@ distance and an object placed at the analytic height will float.
 ### Baked shadows
 
 Once per world, and again when the sun moves 7.5°, the sun is marched across the
-heightfield into a 320²–448² texture covering the near 600 m; then every tree,
-rock, building, cactus, house and bale drops its crown along the light into the
-same texture. Every lit shader samples it via `baked(xz)` from `GLSL_COMMON`.
-**Zero per-frame cost.** Register casters by pushing `[x, y, z, radius, strength,
-height]` into `App._shadows`.
+heightfield into a 320² (448² on high/ultra) texture over `SHADOW` (600 × 630 m in
+front). One fetch serves every lit shader:
+
+| channel | holds |
+|---|---|
+| R | sun: the march, then every caster in `App._shadows` (`[x, y, z, radius, strength, height, near]`) dropped along the light; city boxes (`App._boxes`) raise the heights the march sees |
+| G | sky seen (AO): cavity of the ground below its blurred surroundings, plus a contact disc under each caster; once per world (`App._ao`) |
+| B | standing water depth, square-root encoded to 8 m (water colour, shore fade) |
+| A | how high the shadow climbs each column, `a·640 − 160` m: city walls light from the top down, and a bridge deck and its cars (`bakedSun` with `lift`) are lit above it, not by the gorge floor's shadow. Default 0 = no shadow |
+
+**The near map** (`bakeNear`, `NEAR`): within the 64 m square in front, thin casters
+(`App._casters`, capsules: a saguaro's trunk and arms, a bush's mass) are dropped
+into a 25 cm, mip-mapped map; `bakedRG` takes the darker of the two. A stem does
+not shade its own sunlit side; past the square's edge the coarse map carries the
+same capsules.
+
+**`bakeStatic`** caches per world what the sun doesn't move (heights, city
+raster, water depth, tallest point) in `App._bake`; a sun rebake only marches.
+It is reset in `buildWorld` — set `App._bake = null` if `App._boxes` or
+`P.waterY` ever change after the first bake.
+
+GLSL reads: `bakedRG(xz)`, `baked(xz)`, `bakedSun(p, lift)`, `waterDepth(xz)`; all
+fade to lit outside the map. Without vertex textures `applyShadowMap` keeps the
+1×1 default (lit, no AO, deep, A 0).
 
 ### Disposal
 
 `clearWorld` walks the scene and calls `disposeDeep`, which frees geometries,
 materials and any textures held in their uniforms, with a seen-list so a shared
-texture isn't freed twice. **Push every mesh you add to `App.propMeshes`** (or
-assign it to a named `App.*` slot) or it leaks. `leak_test.js` checks this.
+texture isn't freed twice; cached textures (`userData.cacheKey`) are skipped.
+**Push every mesh you add to `App.propMeshes`** (or assign it to a named `App.*`
+slot) or it leaks.
 
 ### Animation is free
 
-Per-frame JavaScript is **0.043 ms** of a 16.7 ms budget. Traffic, herds,
-butterflies, fireflies, smoke, water, visitors — all compute their position from
-`uTime` in a vertex shader. When adding something that moves, do it there.
-
----
+Traffic, herds, butterflies, fireflies, smoke, water, visitors — all compute
+their position from `uTime` in a vertex shader. Per-frame JavaScript is
+`updateWeather` and the loop. When adding something that moves, do it there.
 
 ---
 
 ## 4a. The toolkit
 
-145 top-level functions. These are the ones you will reach for.
+About 190 top-level functions. These are the ones you will reach for.
 
 ### Randomness and noise
 
@@ -327,20 +394,29 @@ RNG(seedString)   // R.f() R.range(a,b) R.int(a,b) R.pick(arr)
 layoutRng(R, L)   // the paired stream — see §2, and read that before using it
 
 fbm2(x, y, seed, octaves)        // −1..1 fractal noise
-ridged(x, y, seed, octaves)      // 0..1 with sharp crests: mountains, dunes
+ridged(x, y, seed, octaves)      // 0..1 with sharp crests
 tileFBM(size, seed, oct, base)   // a Float32Array that tiles seamlessly (textures)
 ihash(x, y, seed)                // integer hash → 0..1
 smoothstep(e0,e1,x)  clamp(v,lo,hi)  lerp(a,b,t)
 mixHex(target, hexA, hexB, t)    // writes into a THREE.Color
 desat(colour, amount)            // in place
+tintPalette(pal, SEA, sandG, soilG)  // a palette as the season colours it
 ```
 
 ### Placement
 
 ```js
-plantable(P, H, x, z)      // above water, off the path, not too steep
-onPathAt(P, x, z)          // 0..1, how strongly a path covers this spot
-visibleHalfAngle(P)        // radians visible through the glass — see §7
+plantable(P, H, x, z)      // above water, off the path, not too steep, not in a river
+slopeAt(H, x, z)
+onPathAt(P, x, z)          // 0..1, how strongly a path's surface covers this spot
+pathOff(P, x, z)           // distance from the path's centre line
+pathCentre(P, u)           // the centre line in the path's own frame
+pathBlocked(P, x, z, amt, margin)  // surface past amt, or a track's ruts and crown
+inTown(P, x, z, margin)    // inside a city's lots, streets or boxes
+clearAt(P, x, z)           // the kept ground under the window
+visibleHalfAngle(P)        // the scatter wedge, from a fixed 16:9 view
+featureHalfAngle(P)        // the narrower wedge for landmarks, herds, falls, boats
+openingFor(W, aspect)      // eye distance and glass width for a screen shape
 ```
 
 ### Geometry
@@ -351,66 +427,75 @@ and finished once:
 ```js
 pushBox (B, cx,cy,cz, hx,hy,hz, rot)     // half-extents, rotation about Y
 pushCyl (B, cx,cy,cz, r0,r1, h, seg)     // r0 bottom radius, r1 top
-pushCone(B, cx,cy,cz, r, h, seg, invert)
+pushCone(B, cx,cy,cz, r, h, seg, invert, a0)     // a0 start angle (π/4: square roofs)
 pushTube(B, path, radii, seg, ribs)      // ribs = {n, amp} pleats the cross-section
-                                         //   {n:16, amp:0.09}  a saguaro
-                                         //   {n:2,  amp:0.62}  a flat prickly-pear pad
-limbPath(from, to, ctrl, radius, steps) → {path, radii}   // a tapering curve
-finishGeo(B) → BufferGeometry            // computes vertex normals
+limbPath(from, to, ctrl, radius, steps) → {path, radii}
+markSmooth(B, start)                     // vertices from start on are a round surface
+finishGeo(B) → BufferGeometry            // normals; welds seams only in B.sm ranges
 ```
 
-`rib` is a free 0..1 coordinate the solid shader interprets per object: around
-the trunk for bark, along the axis for a hay bale's net wrap, around the section
-for cactus ribs. Choose it to suit the pattern you want.
+Cylinders, cones and tubes mark themselves smooth; boxes don't, so roof hips and
+ridges stay crisp. `rib` is a free 0..1 coordinate the solid shader interprets
+per object (around a trunk, along a bale, the roof of a facade).
 
 ```js
 instanceSolid(scene, geometry, items, material)
-// items[i] = [x, y, z, size, rotationY, scaleY, scaleZ]   (last two default to 1)
+// items[i] = [x, y, z, size, rotationY, scaleY, scaleZ]
 
 solidMat(U, colour, opts)
-//  rib   0|1    ribbed cross-section        ribN       ribs around
-//  grain 0|1|2  1 = bark, 2 = stone         barkN      bark ridges
-//  spines 0..2  spine density               barkPlate  bark plate height
-//  body2        second tone, mottled in     lichen     lichen colour
-//  tipCol / tipMix   colour toward the top  spineCol   nodes
+//  rib 0|1, ribN        ribbed cross-section     spines, spineCol   cactus spines
+//  grain 1 bark, 2 stone, 3 foliage (hedges)     barkN, barkPlate
+//  facade {kind, win, bay, roof, doorW, doorH, round}   → grain 4: boards, logs,
+//        render, stone, brick, corrugated; windows in bays, a door, roof courses
+//  varnish 1            desert varnish and bedding instead of lichen
+//  body2, lichen, tipCol/tipMix, nodes, twoTone, spin
+//  aoH                  contact-shadow height in metres (ambient only)
+//  lift 1               stands above the ground under it: bakedSun(…, 1)
+//  thin m               a painted line m wide that fades as it narrows past a pixel
 ```
+
+Sun, baked shadow and cloud shadow are per fragment in solidMat; ambient and fog
+per vertex.
+
+### Shared GLSL
+
+- `GLSL_TONE` — `tone()`: hue-preserving shoulder, small toe, the grade. Every
+  fragment shader ends with it.
+- `GLSL_HORIZON` — `horizonMix(dir, away, toward, sunDir)`: the azimuth blend
+  the sky, the ridges and `horizonAt` share.
+- `GLSL_COMMON` — `h2`/`vn` (sin-free hash, value noise), `bandAA` (box-filtered
+  band), `bakedRG`/`baked`/`bakedSun`/`waterDepth`/`nearSun`, `fogT`/`fogAmt`/
+  `fogAmtH` (Beer–Lambert blended toward exp² by `uFogShape`, closed-form height
+  falloff by `uFogH`), `horizonAt`, `hazeToward`, `hazeAt` (in-scatter blue then
+  horizon), `hemi(n, amb)` (sky above, `uGroundCol` below), `gustWave`,
+  `cloudShade` (the sky's own clouds projected along the sun), `skyMirror` (sky
+  gradient and clouds along a reflected ray, no geometry).
+- `GLSL_SPRITE_V`/`GLSL_SPRITE_F` — billboard sprites from a 2×2 atlas,
+  mirrored and tinted per instance, lit as a rounded crown (`spriteLight`).
+
+**A shader that includes GLSL_COMMON must not define those names again, and a
+stage that calls them must include GLSL_COMMON itself.**
 
 ### Textures
 
-`cached(key, make)` — a bounded cache (14 ground, 14 cloud, 8 frost).
-`tex(canvas, repeat)` — a CanvasTexture at the hardware's maximum anisotropy.
-`cnv(w, h)` — a canvas.
-
-Every `make*Texture` draws with 2D canvas calls: `makeGroundTexture`,
-`makePropTexture` (tree and shrub sprites), `makeFlowerTexture` (a four-view
-atlas), `makeSprayTexture`, `makeClutterTexture`, `makeCritterTexture`,
-`makeHerdTexture`, `makeFlyerTexture`, `makeWaterLifeTexture`,
-`makeCloudTexture`, `makeGlassTexture`, `makeFrostCanvas`, `makeWallTexture`,
-`makeFinishTexture`, `makeVisitorTexture`, `makeBirdTexture`, `makeSoftDot`.
-
-Foliage: `drawBranches` recurses and **records its tip positions**; `drawCrown`
-lays sprays across the crown *and* one at every recorded tip, so no limb is bare.
+`cached(key, make)` — a bounded cache (14), least recently used out; a texture in
+use moves to the back. Fair-weather skies reuse eight billowed cloud fields.
+`tex(canvas, repeat)`, `cnv(w, h)`. Sprites are 2×2 atlases (`makePropTexture`);
+`drawBranches` records its tips and `drawCrown` puts foliage on every one.
 
 ### The builders
 
-`buildWorld` calls these in order. `dup_test.js` fails if any is called twice.
-
-```
-clearWorld  applyView  sizeWindow
-buildSky  buildTerrain  buildWater  buildGrass  buildFlowers
-buildProps  buildClutter  buildCritters  buildLandmark
-buildBoundaries  buildHerd  buildWaterLife  buildRidges
-buildFlyers  buildMotes  buildDust  buildFalls  buildBirds
-buildVisitors  buildPrecip  buildRoom
-updateWeather → applyShadowMap → writeSeedToUrl → layout → updateHUD
-```
-
-Inside `buildProps`, prop kinds dispatch to `buildRocks`, `buildCacti`,
-`buildBamboo`, `buildWalls`, `buildBales`, `buildBridge`, `buildBlocks`,
-`buildCity` / `cityMesh` / `buildRoofs`, and `buildNearTrees` for anything within
-42 m. `buildFlakes` is the shared engine for rain, snow, leaves and blossom.
-`buildTraffic` lays vehicles along a line and is used by both the bridge and the
-city streets. `buildSmoke` and `buildBeacon` attach to landmarks.
+Inside `buildProps`, kinds dispatch to `buildRocks` (with talus), `buildCacti`
+(saguaros from `saguaroTemplate`), `buildWalls`, `buildBridge`, `buildBlocks`
+(penthouse), `buildCity`, `buildHedgeLines`, `buildNearTrees` (solid trunks and
+spray crowns, handing over to billboards between 36 and 48 m), and
+`buildRoadPoles`; everything else is billboards (`propMat`). The city: `cityPlan` (grid, shared with the terrain shader) →
+`cityBlock`/`cityBuilding`/`cityHeight` → `cityMesh` (facades) and `buildRoofs`
+(plant rooms, tanks, spires), `buildCityHouses`, `cityStreets` (lamps, trees,
+traffic), `cityBeacons`, `buildGlows`. `buildTraffic` serves the bridge and the
+streets; `buildFlakes` rain, snow, leaves and blossom; `buildSmoke` and
+`buildBeacon` attach to landmarks. The bakes: `bakeShadows` → `bakeStatic`,
+`bakeAO`, `bakeNear`; `applyShadowMap`.
 
 ---
 
@@ -420,14 +505,14 @@ city streets. `buildSmoke` and `buildBeacon` attach to landmarks.
 
 ```
 scene camera renderer post              three.js objects
-P U skyU                                params, shared uniforms, sky uniforms
+P U skyU albedo                         params, shared uniforms, sky uniforms
 H Hm                                    analytic height / sampler of the DRAWN mesh
 terrain grass water sky room sash glass glassMat
-rain snow leaves dust falls visitor visitorInfo birdMesh
+rain snow leaves dust falls visitor visitorInfo birdMesh landmark
 propMeshes[] flowerMeshes[]             disposed on the next build
-_shadows[] _features[] _cardMat         build-time scratch, cleared each world
-landmark frostMat frostTarget
-t elapsed lastChange                    clocks
+_shadows[] _casters[] _boxes[] _features[]   build-time scratch, cleared each world
+_ao _bake _nearH                        per-world bake caches
+t elapsed lastChange _wxT               clocks (_wxT: last updateWeather time)
 qTier qAuto qChanges qSettle frameAvg maxAniso
 clearPanes mouseMotion pinned showTools wantSound reduceMotion
 liveClock noNight autoMin bare
@@ -441,23 +526,18 @@ pendingT urlOk urlTick codeTick refreshCode
 ```
 identity  seed base nonce locks biomeKey biome weatherKey weather
           seasonKey season timeA timeB timeMix grass species props
-terrain   terrainKind terrainSeed hillAmp hillFreq waterY shoreZ
-          + whatever the kind needs: riverW gorgeDepth canyonSteps
-            fallSegs oasisW storey blockW …
-cover     coverCount coverStyle coverRows rowSpacing rowAngle rowColour
-          grassHeight flowerCount flowerReach patchiness
-light     sunAz sunEl lightMul hazeMul windBase windName treeTint
-features  pathKind pathW pathGauge landmarkName boundaryKind herdKind
-          herdCount hasBoat waterLife falls dust critters
+          dryClear mirageK
+terrain   terrainKind terrainSeed hillAmp hillFreq waterY
+          + whatever the kind needs: riverW gorgeDepth beds strata erg
+            chanW fallSegs oasisW storey blockW cityFront …
+cover     coverCount coverStyle coverRows rowSpacing rowAngle grassHeight
+          flowerCount flowerReach patchiness
+light     sunAz sunEl lightMul hazeMul windBase windName treeTint rockCol
+features  pathKind pathW pathGauge pathAng bridgeKind boundaryKind herdKind
+          herdCount hasBoat waterLife falls dust critters clearKind
 framing   win = { type, finish, w, h, cy, dist, arch, panes… }
+cached    _city (cityPlan) _inRiver (canyon channel test)
 ```
-
-### Disposal
-
-`clearWorld` disposes geometries, materials **and textures** for
-`App.propMeshes`, `App.flowerMeshes` and every named mesh, with a seen-list so
-nothing is disposed twice. **Anything added to the scene must be pushed to
-`App.propMeshes`, or it leaks.** `leak_test.js` guards this.
 
 ### Transitions
 
@@ -469,25 +549,34 @@ applyScene(code)           // decodes a scene code and transitions
 ```
 
 `transition` refuses to run while another is in flight. **Never call `buildWorld`
-from UI code** — call `go()`. A build started while one is running is retried a
-few times rather than reported as invalid (this was a real bug in the paste box).
+from UI code** — call `go()`.
 
 ### Render order
 
-Transparent and additive things need explicit ordering:
+three draws all opaque objects, then all transparent ones, each list sorted by
+`renderOrder`:
 
 ```
-   0  terrain, solids, grass          5  frost on the pane
-   1  water                           6  the glass
-   2  birds, precipitation            7  motes, fireflies
-   3  smoke                           8  the lighthouse beacon
-   4  waterfall sheets, flyers      890+ distance ridges
-                                     900  the sky sphere
+opaque        0  solids, city, grass, props
+              1  terrain (after what stands on it, so it is never shaded
+                 behind them)
+            900  the sky sphere (last; early-z skips what's covered)
+transparent  −1  water                              4  flyers, cascade, wires
+              1  falls                              5  frost on the pane
+              2  birds, dust, visitors              6  the glass
+              3  smoke, rain, snow                  7  motes, fireflies
+              8  beacons, street and roof lights  890+ distance ridges
 ```
 
-The ridges sit between 2,480 and 2,900 m: beyond the terrain's own relief
-(±2,400 m) so the two don't interleave, and inside the sky sphere (3,000 m) or
-the sky would be nearer than the ridge and cover it.
+The ridges sit between 2,480 and 2,900 m: beyond the terrain's relief so the two
+don't interleave, and inside the sky sphere (3,000 m).
+
+### Quality governor
+
+`applyQuality()` rebuilds post targets and thins instance counts from the tail.
+Meshes whose instances make up whole features carry `userData.noTrim` and are
+left alone (instanced solids, the city, lamps and beacons, near crowns, boundary
+billboards); grass, flowers and scattered props thin.
 
 ---
 
@@ -495,38 +584,28 @@ the sky would be nearer than the ridge and cover it.
 
 **`Prefs`** tries `localStorage`, then a cookie, then memory, so the page works
 in a sandboxed iframe. Stored: `panes qTier qAuto autoMin motion pinned tools
-sound`. Sound is stored "armed" and starts on the first gesture, because browsers
-require one.
+sound`. Sound is stored "armed" and starts on the first gesture.
 
 **Quality tiers** measure frame time and step up or down, at most 8 times per
-session (`qChanges`), with a settling delay so it can't oscillate. `Q()` returns
-the current tier; `applyQuality()` rebuilds the post targets and sheds instances.
+session (`qChanges`), with a settling delay so it can't oscillate.
 
 **Auto-refresh** counts only visible time, then calls `go(randomSeed())`.
 
-**Live clock** maps local time to a solar elevation and picks the matching preset,
-so the window tracks your actual day. `noNight` forces daylight.
+**Live clock** maps local time to a solar elevation and picks the matching preset.
+`noNight` forces daylight.
 
-**Locks** travel in the seed after `@`. `LOCK_KEYS` is the map:
+**Locks** travel in the seed after `@` (`LOCK_KEYS`). Locked ingredients survive
+"new view"; shift-clicking discards them.
 
-```
-b = biome   w = weather   t = time    n = window
-f = finish  s = season    v = view    x = night
-```
+**The error strip** (`showError`) catches `window.onerror`, unhandled rejections
+and `console.error`. Keep it.
 
-Locked ingredients survive "new view"; shift-clicking discards them.
+**The 2D overlay** (`#fx`) draws only rain running on the glass. It sits *above*
+the WebGL canvas, in front of the window frame — nothing that belongs to the
+world may be drawn there.
 
-**The error strip** (`showError`) catches `window.onerror`, unhandled rejections,
-**and `console.error`** — which is how three.js reports shader compile failures.
-Without it a shader error is silent unless the console is open. It earned its
-place during the shimmer work; keep it.
-
-**The 2D overlay** (`#fx`) draws only rain running on the glass now. It sits
-*above* the WebGL canvas, so anything drawn there appears in front of the window
-frame — which is exactly why the light motes had to move into the 3D scene.
-
-**Accessibility**: `aria-expanded` and focus management on the panels, `aria-live`
-on the scene description, Escape closes, keyboard focus wakes the bar,
+**Accessibility**: `aria-expanded` and focus management on the panels,
+`aria-live` on the scene description, Escape closes, keyboard focus wakes the bar,
 `prefers-reduced-motion` disables the camera drift and the flyers, and there is a
 `<noscript>` fallback.
 
@@ -539,22 +618,19 @@ on the scene description, Escape closes, keyboard focus wakes the bar,
 ```
 scene → multisampled target (4×, supersampled 1.35–1.5×)
       → bright pass (9 taps) → separable blur → composite → screen
-composite = box downsample + bloom + contrast + colour grade + film grain
+composite = box downsample + bloom + film grain   (the grade is in tone())
 ```
 
 Two things are load-bearing and were both bugs:
 
 - **`stencilBuffer: true`** on the scene target. In three r128 that is what makes
-  the depth buffer 24-bit. Without it you get 16 bits, and at a 7 km far plane
-  that resolves depth to 2 cm at 8 m — everything in the near field z-fights.
+  the depth buffer 24-bit; 16 bits at a 7 km far plane z-fights the near field.
 - **`WebGLMultisampleRenderTarget`.** An ordinary offscreen target has no
-  anti-aliasing at all. **If WebGL2 is unavailable the post pass is skipped
-  entirely** rather than trading anti-aliasing for bloom — so on WebGL1 you get
-  no bloom and no grain, but a clean image.
+  anti-aliasing. **If WebGL2 is unavailable the post pass is skipped entirely.**
+  Because the grade lives in `tone()`, a frame without post looks the same.
 
-Camera: 52° vertical FOV, near plane **0.3** (not 0.05 — precision), far 7000.
-Terrain is 4800 m across. The sky sphere has radius 3000 — anything placed beyond
-that is hidden behind the sky.
+Camera: 52° vertical FOV, near plane **0.3**, far 7000. Terrain is 4800 m across.
+The sky sphere has radius 3000.
 
 ### Quality tiers
 
@@ -565,43 +641,39 @@ that is hidden behind the sky.
 | high | 180 | 512 | 1.5 | on |
 | ultra | 244 | 512 | 1.5 | on |
 
-Auto mode measures frame time and steps up or down, but **stops after 8 changes**
-so it can't oscillate forever.
+The world must not depend on the tier (§2): heights use `terrainCellAt` sized
+for the coarsest grid.
 
-### Tone and haze
+### Light, fog and haze
 
-Every fragment shader ends with `tone()`: `1 − exp(−1.42c)` plus a little
-saturation, giving highlights a shoulder instead of a hard clip. Applied at 28
-sites.
-
-The fog colour is **derived from the sky's horizon colour**
-(`uFogCol.copy(uHorizon)`). They used to come from separate palette entries,
-which left a visible seam where land met sky. Change one and the other follows.
-
-`hazeToward()` brightens haze toward the sun, scaled by `uHazeK`, which is itself
-scaled by how much sun is actually showing through cloud.
+- **Tone:** `tone()` runs a shoulder on the brightest channel (a blue sky stays
+  blue), eases to per-channel roll-off near white, a small toe, then the grade.
+- **Ambient:** `hemi(n, amb)` — sky from above, the ground's bounce (`uGroundCol`,
+  from `App.albedo`) from below. AO (map G) dims ambient only, never the sun.
+- **Fog:** Beer–Lambert in clear air, closing to an exp² wall in mist and falling
+  weather (`uFogShape`), thinning with height (`uFogH`); dry air on a fine day
+  takes half the density. `uFogCol` is copied from the sky's horizon, so land and
+  sky never seam; `horizonAt` cools it away from a low sun; `hazeAt` adds the
+  sky's blue in-scatter first, so dark things go blue with distance.
+- **Cloud shadows** are the sky's own cloud texture followed along the sun to a
+  1 km deck (`cloudShade`).
+- **Water** takes depth from map B (Beer–Lambert body colour, a soft shore), and
+  reflects only the sky (`skyMirror`) — no geometry.
 
 ### Procedural patterns must be band-limited
 
 A computed pattern has no mip chain. Once its stripes are finer than a pixel it
-becomes moiré. Every such pattern measures its own screen-space frequency:
+becomes moiré. Every such pattern measures its own footprint **on both axes**:
 
 ```glsl
 float bandLimit(float x, float freq){ float w = fwidth(x) * freq; return 1.0 - smoothstep(0.30, 0.85, w); }
+float e = max(fwidth(w.x), fwidth(w.z));      // not fwidth(w.x) alone
 ```
 
-Needs `extensions: { derivatives: true }` on the material. Used for cactus ribs,
-spine rows, rock speckle, bark fissures, crop rows and canyon strata.
+Painted lines and joints use `bandAA`/`sqAA` (exact coverage near, the average
+far). Needs `extensions: { derivatives: true }`. Keep `fwidth` out of branches.
 
-### The 2D overlay
-
-`#fx` is a canvas above the WebGL view carrying rain on the glass. It is *above
-everything*, including the window frame — so nothing that belongs to the world
-may be drawn there. Light motes used to be, and looked like they were inside the
-room; they are 3D now and the overlay does little else.
-
-Frost is a textured plane inside the sash, **behind the glazing bars**, so the
-bars occlude it and it reads as being on the outside of the glass.
+Frost is a textured plane inside the sash, behind the glazing bars.
 
 ---
 
@@ -616,20 +688,13 @@ three noise buffers (pink 19 s, brown 17 s, white 13 s)
    → wet send → convolution reverb (2.4 s stereo IR) → compressor → master
 ```
 
-- **Per-landscape beds.** A moor roars (brown, 0.26); a forest is near silence
-  until a gust (white hiss, 0.03); a desert is 0.02. Sharing one bed made every
-  place sound like the sea.
-- **Wind has a voice** — resonances tuned to what it blows through: pines hiss at
-  2.7 kHz, open grass roars at 150 Hz, a city corner whistles at 855 Hz.
-- **Near / mid / far layers** for rain, surf and rivers.
-- **Formant birds:** a sawtooth pulse train through two sweeping resonators with
-  breath noise. Voices: trill, fluty, gull, coo, hawk. Oscillators alone sound
-  like a synthesiser.
-- **HRTF placement** for birds, frogs, surf, waterfalls, events and visitors.
-- **Events:** drips off the frame, waves on rock, cars passing, twigs, ice ticks,
-  frogs, crickets, distant thunder.
-- **The room:** a 3.4 kHz low-pass between world and listener while the sash is
-  closed, opening to 17 kHz when you open it.
+- **Per-landscape beds**, **wind with a voice** tuned to what it blows through,
+  **near / mid / far layers** for rain, surf and rivers.
+- **Formant birds** (trill, fluty, gull, coo, hawk), **HRTF placement** for birds,
+  frogs, surf, waterfalls, events and visitors.
+- **Events:** drips, waves on rock, cars, twigs, ice ticks, frogs, crickets,
+  distant thunder.
+- **The room:** a 3.4 kHz low-pass while the sash is closed, 17 kHz open.
 - One `AudioContext` for the session; layers are replaced, never the context.
 
 ---
@@ -639,27 +704,15 @@ three noise buffers (pink 19 s, brown 17 s, white 13 s)
 ### The shimmer saga
 
 Reported many times as "shimmering at the bottom of the window". It was **five
-separate bugs**, and for most of that time I was treating symptoms — calming the
-grass, reducing motion, blurring things — while the real causes stood untouched.
+separate bugs**, and for most of that time I was treating symptoms.
 
-1. **16-bit depth buffer** on the post target → everything in the near field
-   z-fought. Fix: `stencilBuffer: true`.
-2. **No multisampling** on the offscreen target. Adding bloom had silently turned
-   anti-aliasing off for the whole scene. Fix: `WebGLMultisampleRenderTarget`.
-3. **Texture reads inside a per-pixel branch.** GLSL leaves the mip level
-   *undefined* there; some drivers pick a different one every frame. Fix: hoist
-   all `texture2D` calls out of branches — a scan enforces it.
-4. **Alpha-to-coverage on flat grazing-angle cards.** Partial alpha becomes a
-   dither pattern that rearranges on every sub-pixel move. Fix: flat ground cards
+1. **16-bit depth buffer** on the post target. Fix: `stencilBuffer: true`.
+2. **No multisampling** on the offscreen target. Fix: `WebGLMultisampleRenderTarget`.
+3. **Texture reads inside a per-pixel branch** — the mip level is undefined
+   there. Fix: hoist every `texture2D` out of branches.
+4. **Alpha-to-coverage on flat grazing-angle cards.** Fix: flat ground cards
    blend; only upright cutouts use coverage.
-5. **Single-tap bloom bright pass** reading a supersampled image into a
-   quarter-size target — small bright things flickered in and out of one sample.
-   Fix: nine taps across the footprint.
-
-Two that *looked* like shimmer but weren't: dark grass spikes standing through
-white snow (deep snow should bury grass and didn't), and pale litter cards on
-green grass mistaken for puddles (blossom litter fell back to a straw colour
-instead of petal pink).
+5. **Single-tap bloom bright pass.** Fix: nine taps across the footprint.
 
 > **Lesson.** When an artefact is reported across many different scenes and always
 > in the same *place on screen*, suspect the renderer, not the objects. "Only when
@@ -667,92 +720,98 @@ instead of petal pink).
 
 ### The river NaN
 
-```js
-var cx = off + bend * (...);      // 'off' = the river's offset
-var off = Math.abs(x - cx);       // ← redeclared, so it hoists
-```
-
-`var` hoists, so the first line read `undefined` and every height became NaN. The
-entire terrain mesh vanished and river valleys showed nothing but sky. This
-shipped for a long time, and I misattributed an early report of it to bloom.
-→ `shadow_test.js` (scope-aware, acorn) and `nan_test.js`.
+A `var` redeclared later in the function hoisted over an earlier read, so every
+height was NaN and river valleys showed only sky.
 
 ### Half the landmarks were invisible
 
-Landmarks were placed at a fixed 14–58° off the view axis. You can only see about
-**36°** either side through the glass — `atan(halfWindowWidth / cameraDistance)`.
-130 of 258 landmarks sat behind the wall. The same mistake was in waterfalls,
-herds and boats. → `visibleHalfAngle(P)`, and builders now *declare* features into
-`App._features` so `visible_test.js` checks facts rather than guessing.
+Placed at a fixed 14–58° off axis when only ~36° is visible. → `visibleHalfAngle`,
+and features declare themselves into `App._features`.
 
-### The reshuffle desync
+### The reshuffle desync, three times
 
-Described in §2. Identity survived reshuffle in only 176 of 500 seeds. Caught
-again immediately when I reintroduced it in the waterfall code.
+`LR` draws made conditionally (§2). Then landmark presence and kind, and the
+bridge kind, drawn from the builder stream — which includes the nonce — so a
+reshuffle turned a barn into a tower. Identity choices take identity streams.
 
-### A duplicate implementation
+### The same seed was another place on a wider screen
 
-A whole second set of builders (boundaries, herds, water life, roofs, ridges,
-~26 KB) was written over an existing set I hadn't noticed. Function declarations
-hoist and the last wins, so the first copy was dead code that read as live.
-→ `dupdef_test.js`.
+Scatter angles were drawn over the live window's wedge, and loops ran as many
+times as the wedge allowed, so the number of builder draws — and with it every
+later placement, `App.t` and the wetness — depended on the window's shape. A
+city built in a portrait window also stayed narrow after rotation. → fixed
+`BUILD_ASPECT`/`FEATURE_ASPECT` wedges and spread floors (≥ 0.9 rad). The same
+trap with the detail tier: a mesa's cliff was sized to the medium grid.
 
-### A GLSL reserved word
+### The clock rode on the builder stream
 
-`patch` is legal in GLSL ES 1.00, which my validator ran, but ANGLE also reserves
-*future* keywords. The terrain shader failed to compile in Chrome and the ground
-simply didn't render. → `reserved_scan.js` checks ANGLE's full list: `flat`,
-`sample`, `filter`, `input`, `output`, `buffer`, `patch` and ~40 others.
+`App.t` and the wetness were the builder stream's last draws, so any builder
+change moved the scene's hour; "burns" were added to hold them still. And a scene
+code, which pins the clock, skipped that draw — so the wetness came out different
+from the same seed loaded plainly. → `/clock` and `/wet`.
 
-### A `THREE.Color` where a canvas belonged
+### A list of biomes is a bug waiting
 
-```js
-var c = cnv(S, S);           // the canvas
-for (…) { var c = colour;    // same function scope: overwrites the canvas
-```
+Six copies of "which landscapes are sandy / dry / farmed" drifted (savanna got no
+puddles in rain; one palette path used an older tint law). → traits on BIOMES,
+one `tintPalette`. Likewise JS numbers copied into GLSL drift: a plant room's
+storey was 3.8 m in the shader and 4.0 m as built. → build shader constants from
+the JS ones.
 
-`texImage2D` then rejected a colour object as an image, and every pine-bearing
-landscape crashed. → `texcheck.js`.
+### Draw order cost more than any shader
 
-### Bloom burning a scene to white
+The terrain drew first, so the whole ground was shaded and then hidden behind the
+city. `terrain.renderOrder = 1`: urban 68 → 46 ms, penthouse 60 → 25 ms on an
+HD 4600.
 
-The bright pass glowed everything above 60% luminance. Overcast drizzle fog sits
-at 77%, so the whole frame lit up and burned out. Threshold is now the top 14%.
+### Shadows that lie
+
+- The near caster map shaded each caster's own sunlit side, and stopped dead at
+  its square's edge with a low sun.
+- The bridge deck and its cars took the gorge floor's shadow (→ map A, `lift`).
+- Without vertex textures the default map's alpha 255 meant "shadow up to
+  480 m": every wall in shade. A default texture is a value; make it mean none.
+- The city's 3×3 shadow soften averaged roof heights into the street.
+- Herd shadows used `(1 − uShadow)` — strongest in overcast. Check which way a
+  term runs before using it (the haze glow had the same inversion with cover).
+
+### The governor cut features in half
+
+Tail-trimming instance counts split anything built from several instances: a
+tower without its podium, a hedge dashed. → `userData.noTrim`.
 
 ### Others worth knowing
 
-- **Sub-pixel geometry aliases.** Rain streaks were 0.3 px at 45 m. Anything thin
-  must widen with distance and fade, or not be drawn.
-- **A product of two sines is a grid.** Rock "cracks" from `sin(x)·sin(z)` read as
-  woven banding. Cellular noise gives irregular jointing.
-- **A grid of horizontal bands on a cylinder is a road marking.** That was the
-  first bark shader. Bark runs *up* a tree.
-- **Foliage must sit on wood.** Leaves were drawn inside an ellipse while branches
-  wandered outside it, leaving bare sticks. Branch ends are recorded during
-  drawing and each gets its own foliage.
-- **Sprite aspect must match the quad.** Flowers were drawn on a square canvas and
-  pasted onto a 0.8 × 1.5 quad — every one stretched 1.9×.
-- **Proportion is identity.** Hay bales 2.5× too long read as pipes, not bales.
-- **The terrain plane continues through the wall.** The terrain shader discards
-  anything with `vW.z > -0.18`.
-- **A mesh can't draw what the grid can't resolve.** Near-vertical waterfall
-  pitches were smoothed into ramps, leaving the water floating 11 m off the rock.
+- **Per-frame rates run at the frame rate.** Wetness dried in 12 s on a fast
+  screen and a minute on a slow one; snow likewise. Integrate with clock `dt`.
+- **`pow` of a negative base is undefined** in GLSL: `pow(max(d, 0.0), k)`.
+- **Welding normals across hard edges** smoothed hip roofs into blobs: weld only
+  `markSmooth` ranges.
+- **A shared GLSL helper is a shared name.** After `vn` moved into GLSL_COMMON,
+  the cascade's fragment (which didn't include it) failed to compile.
+- **A shader-painted feature has no surface.** The canyon's river was a plane
+  under the floor that planting and the boat still believed in; JS tests must
+  follow the paint (`P._inRiver`).
+- **Sub-pixel geometry aliases.** Anything thin must widen with distance and
+  fade, or not be drawn (rain, wires, railings, road lines).
+- **A product of two sines is a grid**; use cellular noise for jointing. Bark
+  runs *up* a tree. **Foliage must sit on wood.** **Sprite aspect must match the
+  quad.** **Proportion is identity** (bales 2.5× too long read as pipes).
+- **The terrain plane continues through the wall**: the shader discards
+  `vW.z > -0.18`.
+- **A mesh can't draw what the grid can't resolve**: seat thin things on the
+  drawn surface (`App.Hm`), not the analytic one, and offset in the script, not
+  with large polygon offsets.
 
 ### Process lessons
 
-- **Measure before fixing.** Floating trees looked like a mesh-resolution problem
-  and were a shader compile failure. A white screen looked like fog and was bloom.
-  Cylinders in a field looked like a mystery object and were mis-proportioned
-  bales. In each case one measurement replaced a wrong guess.
-- **Assert on every patch anchor.** A silent no-op edit ships a "fix" that changes
-  nothing. When an assert fires mid-script, *nothing* is written — re-run the
-  whole patch, don't assume the earlier parts landed.
-- **Check the file actually changed** (size, or grep for the new code).
-- **Cutting text by searching for the next `}` is dangerous.** I twice deleted
-  more than intended, once removing the end of `FX` and the start of `Sound`.
-  `freevars.js` caught it both times.
-- **Test seeds must be valid seeds.** Two tests silently passed against a single
-  degenerate world because their seeds (`'s-1'`) stopped being hex.
+- **Measure before fixing.** One measurement repeatedly replaced a wrong guess
+  (a shader compile failure that looked like floating trees; bloom that looked
+  like fog).
+- **Assert on every patch anchor**, and check the file actually changed.
+- **Test seeds must be valid seeds**, and a `#` in a URL is a fragment — encode it.
+- **Look at the screenshots.** A clean error log says nothing about a white
+  sky or a missing ground.
 
 ---
 
@@ -761,65 +820,82 @@ at 77%, so the whole frame lit up and burned out. Threshold is now the top 14%.
 ### A new landscape
 
 1. Add palettes if it needs its own.
-2. Add a `BIOMES` entry: label, terrain kind, cover, props, weather weights, haze.
+2. Add a `BIOMES` entry: label, terrain kind, traits (`ground`, `dryAir`,
+   `farmed`, `mirage`), cover, props, weather weights, haze.
 3. New terrain shape → a branch in `makeHeightField` returning a closure.
-4. Per-scene parameters go in `buildParams` — **unconditional layout draws**.
-5. Sound: add it to the bed map, the wind-voice map and the bird map in
-   `Sound.reset`.
-6. It takes the next biome index in the scene code automatically.
-7. Run the suite.
+4. Per-scene parameters go in `buildParams` — **unconditional layout draws**, or
+   a stream of their own.
+5. Sound: the bed map, the wind-voice map and the bird map in `Sound.reset`.
+6. Scene codes index the **sorted** keys: a new name renumbers those after it (§2).
+7. Run the checks in §1.
 
 ### A new object
 
-- Instance it; one mesh, many instances.
-- Animate it in the vertex shader from `uTime`.
-- Sit it on `App.Hm`, not the analytic height.
-- Push it to `App.propMeshes` so it is disposed.
-- Register a shadow caster in `App._shadows` if it is solid.
-- If it is a **feature meant to be looked at**, place it within
-  `visibleHalfAngle(P)` and declare it in `App._features`.
-- Fill instance buffers completely, or set `instanceCount` to what you actually
-  filled.
+- Instance it; animate it in the vertex shader from `uTime`.
+- Sit it on `App.Hm`; push it to `App.propMeshes`.
+- Draw its randomness from a sub-stream of its own (§2).
+- Register a shadow caster in `App._shadows` (thin and near: `App._casters`; a
+  solid box: `App._boxes`).
+- A **feature meant to be looked at**: inside `featureHalfAngle(P)`, declared in
+  `App._features`.
+- Whole features in one instanced mesh: `userData.noTrim = true`.
+- If the terrain shader paints something the script must also know about, write
+  it once in JS and once in GLSL, side by side in comments, and keep the pair in
+  lockstep (below).
+
+### JS ↔ GLSL pairs that must change together
+
+| script | shader |
+|---|---|
+| `pathOff`/`pathCentre`/`onPathAt` | `pathUV`/`pathAmt` |
+| `clearAt` | `clearAmt` |
+| `cityPlan`, `CITY_LAMP*` | `uCity`, `uCity2`, lamp pools |
+| `CITY_FLOOR`/`CITY_LOBBY`/`CITY_PARAPET` | `cityMesh` storeys (generated) |
+| `bedTable` | `uBedY`/`uBedH`/`uBedC` (strata) |
+| `duneAt`/`ergDuneAt`/`washAt` | the dune term and its wash levelling (`kDn`) |
+| `P._inRiver` | `chanD` (the canyon's painted river) |
+| `terrainWarp`/`terrainCellAt`/`TERRAIN_SIZE` | the mesh buildTerrain makes |
+| `groundLum` (grass) | the terrain's broad octave (same rotation and offset) |
 
 ### Worth doing next
 
 1. **Weather that moves through** — cloud building, a shower crossing, mist
-   burning off over ten minutes. The biggest gain for *watching* rather than
-   glancing; everything downstream already reads the weather uniforms. **Highest
-   regression risk on this list:** it mutates state everything reads and it
-   interacts with scene codes, which pin a moment. Give it its own pass and tests.
-2. **The window sill** — a plant, a mug, ivy on the frame, a cat. The frame is the
-   one constant across all 28 scenes and it is inert.
-3. **Telegraph poles** with catenary wires receding to the horizon.
-4. **Distant rain shafts** — curtains of rain under a far cloud.
-5. **Dawn chorus curve** for birds; **bells on the hour** with the live clock.
-6. **Place-specific reverb** (a fjord slaps, a snowfield is dead, a city is hard).
+   burning off. Biggest gain for watching; highest regression risk (it mutates
+   state everything reads and interacts with scene codes). Own pass, own checks.
+2. **The window sill** — a plant, a mug, ivy on the frame, a cat.
+3. **Distant rain shafts** under far cloud.
+4. **Dawn chorus curve** for birds; **bells on the hour** with the live clock.
+5. **Place-specific reverb** (a fjord slaps, a snowfield is dead).
+6. **An append-only biome list for scene codes**, so a new landscape doesn't
+   renumber old codes.
+7. Gate the near-map fetch with a uniform where there are no near casters (most
+   landscapes) — only if it measures cheaper.
 
 ### Would not do
 
 - **More full-screen fragment work.** Supersampling already makes every fragment
   cost 2.25×.
 - **Fine high-contrast detail in motion.** That is the entire shimmer history.
-- **Water reflections.** Tried, went badly; calm water is better.
-- **Screen-space depth of field.** Tried, was disliked, and it blurred by screen
-  position rather than distance.
+- **Mirrored geometry in water.** Tried, went badly. Water and wet ground reflect
+  the sky only, and that is enough.
+- **Screen-space depth of field.** Tried, was disliked.
 
 ---
 
 ## 9. Known gaps and rough edges
 
-- **28 meshes still set `frustumCulled = false`.** Correct for camera-facing
-  instanced clouds spanning the view, wasteful for the fixed ones.
+- **31 meshes set `frustumCulled = false`.** Right for camera-facing clouds and
+  view-spanning sets, wasteful for some fixed ones.
 - **Auto detail stops adapting after 8 changes** (`App.qChanges < 8`).
-- **The oasis camp and city houses are placed with `R`, not `LR`,** so they don't
-  move on reshuffle. Harmless but inconsistent.
-- **`visible_test.js` only checks declared features.** A new feature is protected
-  only once it declares itself into `App._features`.
-- **Build time is the one real budget:** 227 ms average, ~800 ms before it's felt.
-  Draw calls and instance counts have an order of magnitude of headroom.
-- **`ui_test.js`, `feat_test.js`, `season_test.js`, `prefs_test.js`** are older and
-  less maintained than the rest; treat their expectations with suspicion before
-  their results.
+- **Scene codes index sorted keys** (§2).
+- **Only declared features** (`App._features`) can be checked for visibility.
+- **Build time is the real budget.** A warm rebuild's sky dropped from 78 to
+  32 ms with the shared cloud fields; the city and the bake are the next costs.
+- **The cascade sheet still leans on a −8/−16 polygon offset.**
+- **`waterDepth` underestimates right at the waterline** (square-root encoding,
+  bilinear filtering). Harmless so far.
+- **ESLint still reports a few benign `no-redeclare`s** (`ba2`, `cph`, `sz`,
+  `top`, `drop`) and many `no-shadow`s.
 
 ---
 
@@ -827,7 +903,7 @@ at 77%, so the whole frame lit up and burned out. Threshold is now the top 14%.
 
 ```
 Seed              8 hex chars                a1b2c3d4
-With layout       + #n                       a1b2c3d4#3
+With layout       + #n                       a1b2c3d4#3     (%23 in a URL)
 With locks        + @k=v,…                   a1b2c3d4#3@b=fjord,s=winter
 Scene code        20 hex - 8 hex             2005…0000-3fa9c21e
 URL               ?code=…   or   ?seed=…
@@ -837,17 +913,9 @@ Keyboard    R = new view      C = copy the Ingredients-Seed     Esc = close a pa
 Controls    new view · reshuffle · panes · detail · auto · sound · motion
 Bottom bar  pin · refresh · controls · ingredients … Ingredients-Seed · copy · paste
 Preferences localStorage → cookie → memory, key 'window-prefs-v1'
-            stores: panes, tools, pinned, sound, motion, autoMin, qTier, qAuto
-Caches      TEXCACHE 14 entries, FROSTCACHE 8
+Caches      TEXCACHE 14 (LRU), FROSTCACHE 8
+Maps        SHADOW x −300..300, z −600..30 (320² / 448²)   NEAR 64 m square (25 cm)
 ```
 
-**Before shipping:**
-
-```
-node --check app.js && node freevars.js && node shadow_test.js &&
-node dupdef_test.js && node dup_test.js && node reserved_scan.js &&
-node extract_shaders.js && for f in shaders/*; do glslangValidator $f; done &&
-node lrsync_test.js && node nan_test.js && node visible_test.js &&
-node partial_test.js && node texcheck.js && node new_test.js &&
-node sandbox_test.js && node leak_test.js && node sound_test.js
-```
+**Before shipping:** syntax check, every landscape clean on four lock sets with
+the screenshots looked at, reshuffle identity 30/30, WebGL1 clean (§1).
