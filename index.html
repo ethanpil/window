@@ -4075,7 +4075,11 @@ function buildTerrain(scene, P, R, U, H) {
       '      if (yb <= uBedY[i]) break;',
       '    }',
       '    float kS = 1.0 - smoothstep(0.30, 0.85, fwidth(yb) * 1.5);',
-      '    bedOn = smoothstep(0.05, 0.22, slope0) * step(uBedY[0], yb);',
+      /* A canyon's soft beds weather back to slopes of a third or a half,
+         which the slope test alone left as plain sand: every wall between
+         the floor and the rim is the rock it is cut through */
+      '    float inWall = step(0.5, uCan1.w) * smoothstep(uFloorY + 0.8, uFloorY + 2.6, vW.y) * (1.0 - smoothstep(-4.0, -1.0, yb));',
+      '    bedOn = max(smoothstep(0.05, 0.22, slope0), inWall) * step(uBedY[0], yb);',
       '    bedC = mix(bedC, uRock * 1.15, 0.3);',
       '    c = mix(c, bedC * (0.90 + 1.2 * (c2.g - cM.g) + 0.2 * (dirt - 0.5)), bedOn * 0.9);',
       '    c *= 1.0 - 0.24 * (1.0 - smoothstep(0.0, 0.3 + 1.5 * fwidth(yb), partD)) * kS * bedOn;',
