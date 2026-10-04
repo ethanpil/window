@@ -4102,6 +4102,10 @@ function buildTerrain(scene, P, R, U, H) {
       '  vec2 fN = normalize(vN.xz + vec2(1e-4, 0.0));',
       /* bedded rock is laminated across the face, not grooved down it */
       '  vec2 bb = texture2D(uTex, vec2(dot(vW.xz, vec2(-fN.y, fN.x)), vW.y) * mix(vec2(0.031, 0.012), vec2(0.009, 0.075), uStrata) + vec2(0.4, 0.1)).gr;',
+      /* where the face levels off (a crest, a bench) the face's own
+         direction is undefined and flips across it: hand over to the
+         ground's top-down first tap, already fetched */
+      '  bb = mix(c0.gr, bb, smoothstep(0.04, 0.20, length(vN.xz)));',
       '  float rmod = bb.x;',
       '  float gully = smoothstep(0.08, 0.2, bb.x - bb.y);',
       '  vec3 rockC = (uStrata > 0.5 ? bedC * mix(1.06, 0.90, hardB) : uRock) * (0.70 + 0.65 * rmod) * (1.0 - 0.26 * gully) * (1.0 - 0.22 * smoothstep(0.42, 0.22, rmod));',
@@ -4124,7 +4128,9 @@ function buildTerrain(scene, P, R, U, H) {
       '  float det = dot(dpx, r1);',
       '  vec3 sg = sign(det) * (dFdx(hb) * r1 + dFdy(hb) * r2);',
       '  vec3 Nb = normalize(abs(det) * vN - sg);',
-      '  N2 = normalize(mix(N2, Nb, rockW * 0.8 * step(1e-9, abs(det))));',
+      /* the bump is the texture's slope per pixel, so it fades once a pixel
+         spans more than the grain it was cut from */
+      '  N2 = normalize(mix(N2, Nb, rockW * 0.8 * step(1e-9, abs(det)) * (1.0 - smoothstep(0.30, 0.85, fwW * 0.6))));',
       '  if (uSalt > 0.5) {',
       '    vec3 sgS = sign(det) * (dFdx(saltH) * r1 + dFdy(saltH) * r2);',
       '    N2 = normalize(mix(N2, normalize(abs(det) * vN - sgS), 0.8 * step(1e-9, abs(det))));',
