@@ -3017,10 +3017,6 @@ function makeHeightField(P) {
   }
   if (kind === 'dunes') {
     var da = P.duneAmp, mesa = P.mesaH, DU = P.dune;
-    var cellAt = function (d) {   /* the terrain grid's spacing d metres out (buildTerrain's warp, medium tier) */
-      var a = Math.cbrt(d / (0.972 * 2400));
-      return (0.028 + 2.916 * a * a) * 2400 * 2 / 132;
-    };
     /* A dry wash: a flat floor cut into the land, the dunes levelled across
        it, half a metre to a metre deep, on the path's own curve */
     var wcut = P.pathKind === 'wash' ? 0.5 + (P.pathW - 5) / 9 * 0.5 : 0;
@@ -3054,7 +3050,7 @@ function makeHeightField(P) {
       var m = fbm2(x * 0.0026, z * 0.0026, s + 7, 3) - (1 - smoothstep(260, 520, d)) * 0.8;
       /* the noise climbs about 0.0026 a metre: a cliff two and a half grid
          cells across, never less than 15 m */
-      var w = clamp(Math.max(cellAt(d) * 2.5, 15) * 0.0026, 0.04, 0.3);
+      var w = clamp(Math.max(terrainCellAt(d, QUALITY[0].grid) * 2.5, 15) * 0.0026, 0.04, 0.3);
       var top = smoothstep(0.16, 0.16 + w, m);
       var apron = smoothstep(0.16 - w * 3, 0.16, m);
       h += mesa * (top * 0.86 + apron * apron * 0.14) + top * fbm2(x * 0.01, z * 0.01, s + 9, 2) * mesa * 0.03;
@@ -3577,17 +3573,27 @@ function buildSky(scene, P, R, U) {
 }
 
 /* ---------- terrain ---------- */
+/* An even grid wastes vertices on the horizon and starves the foreground, so
+   the terrain's is warped: about a metre across near the window, tens of
+   metres out. u runs -1..1 across the grid. */
+var TERRAIN_SIZE = 4800;
+function terrainWarp(u) {
+  var a = Math.abs(u);
+  return (u < 0 ? -1 : 1) * (0.028 * a + 0.972 * a * a * a) * TERRAIN_SIZE * 0.5;
+}
+/* the grid's spacing d metres out, on a grid of seg cells a side. Shapes
+   that must read on every tier (a mesa's cliff) size themselves for the
+   coarsest, so the land is the same on all of them. */
+function terrainCellAt(d, seg) {
+  var a = Math.cbrt(d / (0.972 * TERRAIN_SIZE * 0.5));
+  return (0.028 + 2.916 * a * a) * TERRAIN_SIZE / seg;
+}
+
 function buildTerrain(scene, P, R, U, H) {
-  /* An even grid wastes vertices on the horizon and starves the foreground, so
-     this one is warped: about a metre across near the window, tens of metres out. */
-  var SIZE = 4800, SEG = Q().grid;
+  var SEG = Q().grid;
   var pos = [], idx = [], i, j;
-  var warp = function (u) {
-    var a = Math.abs(u);
-    return (u < 0 ? -1 : 1) * (0.028 * a + 0.972 * a * a * a) * SIZE * 0.5;
-  };
   var axis = [];
-  for (i = 0; i <= SEG; i++) axis.push(warp((i / SEG) * 2 - 1));
+  for (i = 0; i <= SEG; i++) axis.push(terrainWarp((i / SEG) * 2 - 1));
   for (j = 0; j <= SEG; j++) {
     for (i = 0; i <= SEG; i++) {
       var x = axis[i], z = axis[j];
