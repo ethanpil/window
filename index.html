@@ -2452,8 +2452,25 @@ var GLSL_TONE = [
   '}'
 ].join('\n');
 
+/* The horizon is the colour of the sky toward the sun and cooler, pinker,
+   away from it when the sun is low, blended by azimuth. The sky passes its
+   own pair; the land's haze its own (horizonAt), so they meet without a seam. */
+var GLSL_HORIZON = [
+  'vec3 horizonMix(vec3 dir, vec3 away, vec3 toward, vec3 sunDir){',
+  '  float w = dot(normalize(dir.xz + vec2(1e-5)), normalize(sunDir.xz + vec2(1e-5))) * 0.5 + 0.5;',
+  '  return mix(away, toward, smoothstep(0.0, 1.0, w)); }'
+].join('\n');
+
 var GLSL_COMMON = [
   'uniform sampler2D uShadowMap; uniform vec2 uShadowOrigin, uShadowScale;',
+  /* a hash without sin(), which loses its precision kilometres out, and
+     smooth value noise from it */
+  'float h2(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
+  'float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
+  '  return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + vec2(1.0)), f.x), f.y); }',
+  /* how much of the band lo..hi a pixel of width f centred on d covers:
+     exact close in, the band's average once it is under a pixel */
+  'float bandAA(float d, float lo, float hi, float f){ f = max(f, 1e-3); return max(0.0, min(d + 0.5 * f, hi) - max(d - 0.5 * f, lo)) / f; }',
   /* outside the baked rectangle the edge texels would repeat to the horizon
      (clamp to edge), smearing one shadow into a stripe; fade to lit instead */
   /* .x sun (1 lit), .y sky seen (ambient occlusion: hollows, under things) */
@@ -2496,14 +2513,11 @@ var GLSL_COMMON = [
   '  float ya = max(cameraPosition.y, 0.0), k = (max(y, 0.0) - ya) / uFogH;',
   '  float g = exp(-ya / uFogH) * (abs(k) < 1e-3 ? 1.0 : (1.0 - exp(-k)) / k);',
   '  return max(fogT(density * d * g), smoothstep(1900.0, 2400.0, d)); }',
-  /* The horizon is the colour of the sky toward the sun (uFogCol) and cooler,
-     pinker, away from it when the sun is low. Land and sky both read it here,
-     so the far ground still meets the sky without a seam all the way round. */
+  /* the land's horizon: the fog colour toward the sun, uFogAway away */
   'uniform vec3 uFogAway, uInScat, uGroundCol;',
   'uniform float uWet;',             /* 0 dry, 1 just rained */
-  'vec3 horizonAt(vec3 dir, vec3 fogCol, vec3 sunDir){',
-  '  float w = dot(normalize(dir.xz + vec2(1e-5)), normalize(sunDir.xz + vec2(1e-5))) * 0.5 + 0.5;',
-  '  return mix(uFogAway, fogCol, smoothstep(0.0, 1.0, w)); }',
+  GLSL_HORIZON,
+  'vec3 horizonAt(vec3 dir, vec3 fogCol, vec3 sunDir){ return horizonMix(dir, uFogAway, fogCol, sunDir); }',
   'uniform float uHazeK;',
   'vec3 hazeToward(vec3 fogCol, vec3 viewDir, vec3 sunDir, vec3 sunCol){ float f = pow(max(dot(viewDir, normalize(sunDir)), 0.0), 3.0) * uHazeK; return horizonAt(viewDir, fogCol, sunDir) + sunCol * f * 0.12; }',
   /* The first few hundred metres of air add the sky's own blue before the
@@ -3451,12 +3465,12 @@ function buildSky(scene, P, R, U) {
       'uniform vec2 uOff1, uOff2;',
       'uniform sampler2D uCloudTex;',
       'varying vec3 vDir;',
+      GLSL_HORIZON,
       'void main(){',
       '  vec3 d = normalize(vDir);',
       '  float h = max(d.y, 0.0);',
       /* the same horizon the land fades to (horizonAt in GLSL_COMMON) */
-      '  float wAz = dot(normalize(d.xz + vec2(1e-5)), normalize(uSunDir.xz + vec2(1e-5))) * 0.5 + 0.5;',
-      '  vec3 hor = mix(uHorizonAway, uHorizon, smoothstep(0.0, 1.0, wAz));',
+      '  vec3 hor = horizonMix(d, uHorizonAway, uHorizon, uSunDir);',
       '  vec3 sky = mix(hor, uZenith, pow(h, 0.45));',
       '  sky = mix(sky, hor * 0.86, smoothstep(0.0, -0.14, d.y));',
       '  float sd = max(dot(d, normalize(uSunDir)), 0.0);',
@@ -3780,10 +3794,10 @@ function buildTerrain(scene, P, R, U, H) {
       'uniform float uCityOn, uNight, uCityBuilt; uniform vec4 uCity, uCity2; uniform vec3 uCityPark;',
       /* Painted lines and paving joints, box-filtered over the pixel's own
          footprint f: exact coverage near, their average far, never moire.
-         sqAA: a dash pattern of period T, duty D. bandAA: the band lo..hi. */
+         sqAA: a dash pattern of period T, duty D (bandAA, the band lo..hi, is
+         in GLSL_COMMON). */
       'float sqI(float x, float T, float D){ return floor(x / T) * D * T + min(fract(x / T) * T, D * T); }',
       'float sqAA(float x, float T, float D, float f){ f = max(f, 1e-3); return (sqI(x + 0.5 * f, T, D) - sqI(x - 0.5 * f, T, D)) / f; }',
-      'float bandAA(float d, float lo, float hi, float f){ f = max(f, 1e-3); return max(0.0, min(d + 0.5 * f, hi) - max(d - 0.5 * f, lo)) / f; }',
       /* is the block centred here part of the city (its streets are drawn)? */
       'float cityBlk(vec2 b){ float d = length(b * uCity.z); return step(uCity2.z, d) * step(d, uCity2.w); }',
       /* the same edge as clearAt() in the script */
@@ -3807,12 +3821,6 @@ function buildTerrain(scene, P, R, U, H) {
       '  float e = max(fwidth(w.x), fwidth(w.z)) * 0.5;',
       '  return 1.0 - smoothstep(uPathW - e, uPathW * 1.5 + e, off);',
       '}',
-      /* smooth value noise for bare earth: the ground texture is painted with
-         grass blades, and those showed through every path */
-      /* a hash without sin(), which loses its precision kilometres out */
-      'float h2(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
-      'float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
-      '  return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + vec2(1.0)), f.x), f.y); }',
       'uniform vec3 uCamPos, uZenith, uHorizon, uCloudL, uCloudD;',
       'varying vec3 vW; varying vec3 vN; varying float vFog;',
       GLSL_COMMON,
@@ -5956,9 +5964,6 @@ function cityMesh(scene, P, R, U, items) {
       'varying vec3 vN; varying vec3 vL; varying float vFog; varying vec3 vSize; varying vec3 vW;',
       'varying vec4 vInfo; varying vec3 vCol; varying vec3 vGlass;',
       'float h21(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }',
-      /* how much of the band lo..hi a pixel of width f centred on d covers:
-         exact close in, the band's average once it is under a pixel */
-      'float bandAA(float d, float lo, float hi, float f){ f = max(f, 1e-3); return max(0.0, min(d + 0.5 * f, hi) - max(d - 0.5 * f, lo)) / f; }',
       GLSL_COMMON,
       /* the sky in a pane: skyMirror's gradient with a single cloud tap,
          which is all a window can show and half the fetches over a city
@@ -8199,17 +8204,11 @@ function buildCascadeFall(scene, P, R, U, H) {
     fragmentShader: [
       GLSL_TONE,
       'uniform float uTime, uLen; varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze; varying float vDrop;',
-      'float h1(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.545); }',
-      /* Value noise. Read with the fall stretched against the width, it draws
-         threads rather than blobs. The old pattern cut the sheet into thirty
-         columns and gave each one a single brightness across its whole width,
-         so it could only ever read as a row of vertical bars. */
-      'float vn(vec2 p){',
-      '  vec2 i = floor(p), f = fract(p);',
-      '  f = f * f * (3.0 - 2.0 * f);',
-      '  return mix(mix(h1(i), h1(i + vec2(1.0, 0.0)), f.x),',
-      '             mix(h1(i + vec2(0.0, 1.0)), h1(i + vec2(1.0, 1.0)), f.x), f.y);',
-      '}',
+      GLSL_COMMON,
+      /* Value noise (vn). Read with the fall stretched against the width, it
+         draws threads rather than blobs. The old pattern cut the sheet into
+         thirty columns and gave each one a single brightness across its whole
+         width, so it could only ever read as a row of vertical bars. */
       'void main(){',
       '  float d = vUv.y;',                       /* 0 at the head, 1 in the pool */
       /* The water gathers speed as it drops. That has to come from the shape
@@ -9131,11 +9130,11 @@ function buildRidges(scene, P, R, U) {
         'varying vec3 vW; varying float vTop; varying float vSlope;',
         'float rh(float p){ return fract(sin(p * 127.1) * 43758.5453); }',
         'float rn(float p){ float i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(rh(i), rh(i + 1.0), f); }',
+        GLSL_HORIZON,
         'void main(){',
         /* the horizon behind them, warm toward the sun and cool away (horizonAt) */
         '  vec3 vd = normalize(vW - cameraPosition);',
-        '  float wAz = dot(normalize(vd.xz + vec2(1e-5)), normalize(uSunDir.xz + vec2(1e-5))) * 0.5 + 0.5;',
-        '  vec3 hor = mix(uFogAway, uFogCol, smoothstep(0.0, 1.0, wAz));',
+        '  vec3 hor = horizonMix(vd, uFogAway, uFogCol, uSunDir);',
         '  float hN = vTop / uHeight;',                       /* 0 near the foot, ~1 at the summits */
         /* A face of its own: the profile's slope turns it toward or away from
            the sun, and gullies run down it. The gullies fade once they are
@@ -10284,9 +10283,7 @@ function buildFalls(scene, P, R, U, H) {
       'uniform vec3 uAmbCol, uSunCol;',
       'uniform float uTime;',
       'varying vec2 vUv; varying float vFog; varying float vLen, vSeed, vW; varying vec3 vHaze;',
-      'float hf(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
-      'float vnf(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);',
-      '  return mix(mix(hf(i), hf(i + vec2(1.0, 0.0)), f.x), mix(hf(i + vec2(0.0, 1.0)), hf(i + vec2(1.0)), f.x), f.y); }',
+      GLSL_COMMON,
       'void main(){',
       /* Streaks running down the drop, stretched along it and quickening as
          they go; a puffy cloud texture read up it had made a dotted line.
@@ -10294,12 +10291,12 @@ function buildFalls(scene, P, R, U, H) {
       '  float d = 1.0 - vUv.y;',
       '  float along = pow(max(d, 0.0), 0.7) * vLen * 0.09;',   /* pow of a negative is undefined */
       '  float x = vUv.x * vW * 0.9 + vSeed * 7.0;',
-      '  float s1 = vnf(vec2(x, along - uTime * 2.2));',
-      '  float s2 = vnf(vec2(x * 2.3 + 3.1, along * 1.9 - uTime * 4.1));',
+      '  float s1 = vn(vec2(x, along - uTime * 2.2));',
+      '  float s2 = vn(vec2(x * 2.3 + 3.1, along * 1.9 - uTime * 4.1));',
       '  float k2 = 1.0 - smoothstep(0.30, 0.85, fwidth(x) * 2.3);',
       '  float n = s1 * 0.62 + mix(0.5, s2, k2) * 0.38;',
       /* the edges wander as the water does */
-      '  float ew = vnf(vec2(along * 0.25, vSeed)) * 0.18;',
+      '  float ew = vn(vec2(along * 0.25, vSeed)) * 0.18;',
       '  float edge = smoothstep(0.0, 0.16 + ew, vUv.x) * smoothstep(1.0, 0.84 - ew, vUv.x);',
       '  float a = edge * mix(0.75, 0.45, d) * smoothstep(0.25, 0.70, n);',
       '  a += edge * (1.0 - smoothstep(0.0, 0.08, d)) * 0.35;',
