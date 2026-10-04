@@ -2241,7 +2241,7 @@ function drawPropSprite(g, S, kind, P, R, opts) {
    the builder's stream as it always was; the others from streams of their
    own, so nothing else in the world moves. Light is not painted in: the sun
    moves, and goes down, and the shader lights the crown (spriteLight). */
-var SPRITE_BURN = { creosote: 2835, brittlebush: 2413 };
+var SPRITE_OWN = { creosote: 1, brittlebush: 1 };
 function makePropTexture(kind, P, R, opts) {
   var S = 256, c = cnv(S * 2, S * 2), g = c.getContext('2d');
   for (var v = 0; v < 4; v++) {
@@ -2249,12 +2249,8 @@ function makePropTexture(kind, P, R, opts) {
     g.translate((v & 1) * S, (v >> 1) * S);
     g.beginPath(); g.rect(0, 0, S, S); g.clip();
     g.lineCap = 'round'; g.lineJoin = 'round';
-    /* Redrawn kinds draw their first tile from a stream of their own too:
-       the builder's stream still takes the draws the old drawing took, so
-       the clock and everything built after stay put. */
-    var RV = R;
-    if (!v && SPRITE_BURN[kind]) { for (var bn = 0; bn < SPRITE_BURN[kind]; bn++) R.f(); RV = RNG(P.base + '/sprite/' + kind + '/0'); }
-    drawPropSprite(g, S, kind, P, v ? RNG(P.base + '/sprite/' + kind + '/' + v) : RV, opts);
+    /* redrawn desert kinds draw their first tile from a stream of their own too */
+    drawPropSprite(g, S, kind, P, v || SPRITE_OWN[kind] ? RNG(P.base + '/sprite/' + kind + '/' + v) : R, opts);
     g.restore();
   }
   return tex(c, false);
@@ -2832,14 +2828,18 @@ function buildWorld(seed) {
   shareCommon(scene);
 
   /* This world's clock before the bake: baked under the last world's sun,
-     the map was thrown away and baked again on the first frame. The builder
-     stream draws these in the same order as before. */
-  App.t = App.pendingT != null ? App.pendingT : R.range(0, 500);
+     the map was thrown away and baked again on the first frame. The clock
+     and the wet ground come from streams of their own, so no builder's draws
+     can move them, and a scene code's pinned clock leaves the wetness alone.
+     The clock moves on a reshuffle (another look at the place); whether it
+     rained lately is the place's weather and stays. */
+  App.t = App.pendingT != null ? App.pendingT : RNG(P.base + '/clock' + (P.nonce ? '/' + P.nonce : '')).range(0, 500);
   App.pendingT = null;
   App._wxT = null;
   App.elapsed = 0;
   App.nextFlash = null; App.flash = 0; App.flashAgain = null;
-  App.wetness = P.weather.rain > 0 ? 1 : (R.f() < 0.18 ? R.range(0.4, 1) : 0);
+  var WS = RNG(P.base + '/wet');
+  App.wetness = P.weather.rain > 0 ? 1 : (WS.f() < 0.18 ? WS.range(0.4, 1) : 0);
   App.bowTarget = 0; App.skyU.uBow.value = 0;
   updateWeather(App.t);
   applyShadowMap(bakeShadows(P, H, U.uSunDir.value));
@@ -5532,8 +5532,7 @@ function buildCacti(scene, P, R, U, H, spec) {
     }
     placed++;
   }
-  /* the saguaros' shapes come from a stream of their own; the builder's
-     stream still draws the old templates' numbers, so nothing after moves */
+  /* the saguaros' shapes come from a stream of their own */
   var CR = RNG(P.base + '/build/cacti' + (P.nonce ? '/' + P.nonce : ''));
   var SAG = [2.6, 5.4, 9.6];   /* spear, young, old: template heights */
   for (var kind2 in buckets) {
@@ -5544,12 +5543,10 @@ function buildCacti(scene, P, R, U, H, spec) {
     for (var t = 0; t < 2; t++) {
       var part = items.filter(function (_, idx) { return idx % 2 === t; });
       if (!part.length) continue;
-      var tpl = cactusTemplate(R, kind2);
       var solids = [];
       for (var i = 0; i < part.length; i++)
         solids.push([part[i][0], H(part[i][0], part[i][1]) - 0.03, part[i][1], part[i][2], R.range(0, 6.283), part[i][3], 1]);
-      if (kind2 !== 'saguaro') { instanceSolid(scene, tpl, solids, mat); continue; }
-      tpl.dispose();
+      if (kind2 !== 'saguaro') { instanceSolid(scene, cactusTemplate(R, kind2), solids, mat); continue; }
       for (var cl = 0; cl < 3; cl++) {
         var mine = [];
         for (i = 0; i < part.length; i++) {
@@ -8435,14 +8432,15 @@ function buildBoundaries(scene, P, R, U, H) {
   if (R.f() < 0.7) for (var j = 0; j < R.int(1, 2); j++)
     lines.push({ a: mainA + Math.PI / 2 + R.range(-0.22, 0.22), d: R.range(30, 240) * (R.f() < 0.5 ? -1 : 1) });
 
-  var posts = [], rails = [], stones = [], bushes = [], trees = [], hedges = [];
+  var posts = [], rails = [], stones = [], trees = [], hedges = [];
   for (var L = 0; L < lines.length; L++) {
     var ln = lines[L], ca = Math.cos(ln.a), sa = Math.sin(ln.a);
     /* the line's own origin, offset sideways from the window */
     var ox = -sa * ln.d, oz = ca * ln.d;
     var step = kind === 'fence' ? 2.6 : (kind === 'wall' ? 1.7 : (kind === 'shelter' ? 7.5 : 2.1));
     var half = R.range(120, 340);
-    if (kind === 'hedge') hedges.push({ x: ox, z: oz, ca: ca, sa: sa, half: half });
+    /* a hedge is laid along the line by buildHedgeLines, which walks it itself */
+    if (kind === 'hedge') { hedges.push({ x: ox, z: oz, ca: ca, sa: sa, half: half }); continue; }
     var gapAt = R.range(0, 1), gapW = R.range(0.03, 0.09);   /* a gate or a gap */
     for (var t = -half; t <= half; t += step) {
       var x = ox + ca * t, z = oz + sa * t;
@@ -8457,29 +8455,21 @@ function buildBoundaries(scene, P, R, U, H) {
       /* nobody fences a cliff: a line stops where the ground gets steep */
       if (slopeAt(H, x, z) > 0.55) continue;
       var y = H(x, z);
+      /* a canyon's fences keep to the rim: none down the benches and walls */
+      if (P.biomeKey === 'canyon' && (y < -6 || slopeAt(H, x, z) > 0.25)) continue;
+      /* and a gap is left where a track passes, ruts and crown */
+      if (pathBlocked(P, x, z, 0.4, step * 0.5)) continue;
       var jx = x + R.gauss() * 0.12, jz = z + R.gauss() * 0.12;
-      /* a canyon's fences keep to the rim: none down the benches and walls
-         (decided after the draws, so the stream is drawn as before) */
-      var keepF = !(P.biomeKey === 'canyon' && (y < -6 || slopeAt(H, x, z) > 0.25));
-      /* and a gap is left where a track passes, ruts and crown (likewise) */
-      keepF = keepF && !pathBlocked(P, x, z, 0.4, step * 0.5);
       if (kind === 'fence') {
-        var postH = R.range(0.85, 1.1);
-        if (keepF) {
-          posts.push([jx, y, jz, postH, ln.a, 1, 1]);
-          rails.push([x + ca * step * 0.5, H(x + ca * step * 0.5, z + sa * step * 0.5), z + sa * step * 0.5,
-                      step * 0.52, ln.a, 1, 1]);
-        }
+        posts.push([jx, y, jz, R.range(0.85, 1.1), ln.a, 1, 1]);
+        rails.push([x + ca * step * 0.5, H(x + ca * step * 0.5, z + sa * step * 0.5), z + sa * step * 0.5,
+                    step * 0.52, ln.a, 1, 1]);
       } else if (kind === 'wall') {
-        var stone = [jx, y - 0.05, jz, R.range(0.92, 1.12), ln.a + R.range(-0.05, 0.05), R.range(0.9, 1.1), 1];
-        if (keepF) stones.push(stone);
-      } else if (kind === 'shelter') {
-        var tree = [jx, jz, R.range(6, 13)];
-        if (keepF) trees.push(tree);
+        stones.push([jx, y - 0.05, jz, R.range(0.92, 1.12), ln.a + R.range(-0.05, 0.05), R.range(0.9, 1.1), 1]);
       } else {
-        bushes.push([jx, jz, R.range(1.5, 2.9)]);     /* drawn only to keep the stream in step */
+        trees.push([jx, jz, R.range(6, 13)]);
       }
-      if (keepF && d < 240 && (kind === 'wall' || kind === 'shelter'))
+      if (d < 240 && kind !== 'fence')
         App._shadows.push([x, y, z, kind === 'shelter' ? 2.6 : 1.0, 0.7, kind === 'shelter' ? 8 : 1.6]);
     }
   }
@@ -8503,7 +8493,7 @@ function buildBoundaries(scene, P, R, U, H) {
     var wmat = solidMat(U, R.pick(['#8b8578', '#7d7a70', '#948d7e', '#6f6a60']), { rib: 0, grain: 2, spines: 0, body2: '#9a9488', lichen: '#9aa15a' });
     for (var wf = 0; wf < 4; wf++) if (wparts[wf].length) instanceSolid(scene, wforms[wf], wparts[wf], wmat);
   }
-  if (bushes.length) {
+  if (hedges.length) {
     /* a hedge is a continuous bank of leaves, not bushes in a row */
     var HRb = RNG(P.base + '/build/hedges' + (P.nonce ? '/' + P.nonce : ''));
     buildHedgeLines(scene, P, U, H, hedges, HRb.range(1.5, 2.6), HRb);
@@ -8925,15 +8915,14 @@ function buildWaterLife(scene, P, R, U, H) {
   if (R.f() < 0.5) {
     /* moored where a narrow window still sees it (featureHalfAngle) */
     var bLim = featureHalfAngle(P) * 0.85, bSpots = spots.filter(function (q) { return Math.abs(Math.atan2(q[0], -q[1])) < bLim; });
-    var bs = (bSpots.length ? bSpots : spots)[R.int(0, (bSpots.length || spots.length) - 1)];
-    var bmat = solidMat(U, R.pick(['#7a6448', '#8d6f4e', '#5f5a54', '#a8452f', '#3f5a72']), { rib: 0, grain: 1, spines: 0, barkN: 26, barkPlate: 9 });
-    /* drawn for whether or not there is room for it, so the stream runs on alike */
-    var bGeo = boatGeo(R), bItem = [bs[0], wy - 0.10, bs[1], R.range(1.6, 2.6), R.range(0, 6.283), 1, 1];
     if (bSpots.length) {
-      instanceSolid(scene, bGeo, [bItem], bmat);
+      var bs = bSpots[R.int(0, bSpots.length - 1)];
+      var bmat = solidMat(U, R.pick(['#7a6448', '#8d6f4e', '#5f5a54', '#a8452f', '#3f5a72']), { rib: 0, grain: 1, spines: 0, barkN: 26, barkPlate: 9 });
+      var bGeo = boatGeo(R);
+      instanceSolid(scene, bGeo, [[bs[0], wy - 0.10, bs[1], R.range(1.6, 2.6), R.range(0, 6.283), 1, 1]], bmat);
       P.hasBoat = true;
       App._features.push(['boat', bs[0], bs[1]]);
-    } else { bGeo.dispose(); bmat.dispose(); }
+    }
   }
 
   var kinds = [];
@@ -9317,15 +9306,13 @@ function makeCritterTexture(kind) {
 }
 
 function buildCritters(scene, P, R, U, H) {
-  /* Lizards bask by day; scorpions hunt by night and hide from the sun. At
-     night there were no critters at all (and none of the builder's stream
-     is drawn then, so the night's scorpions come from a stream of their
-     own); by day the scorpions' draws are still taken, and nothing built. */
+  /* Lizards bask by day; scorpions hunt by night and hide from the sun (the
+     night's come from a stream of their own). */
   if (!P.biome.critters || P.weather.rain > 0.3) return;
   var dark = P.timeA === 'night';
   if (dark && !/desert|canyon|oasis/.test(P.biomeKey)) return;
   if (dark) R = RNG(P.base + '/build/critters/night' + (P.nonce ? '/' + P.nonce : ''));
-  var kinds = dark ? [['scorpion', R.int(1, 3)]] : [['lizard', R.int(1, 3)], ['scorpion', R.chance(0.6) ? 1 : 0]];
+  var kinds = [dark ? ['scorpion', R.int(1, 3)] : ['lizard', R.int(1, 3)]];
   for (var ki = 0; ki < kinds.length; ki++) {
     var kind = kinds[ki][0], n = kinds[ki][1];
     if (!n) continue;
@@ -9344,7 +9331,6 @@ function buildCritters(scene, P, R, U, H) {
       var da = R.range(0, 6.283), dl = kind === 'lizard' ? R.range(0.5, 1.2) : R.range(0.25, 0.5);
       iDart[i * 3] = Math.cos(da) * dl; iDart[i * 3 + 1] = da; iDart[i * 3 + 2] = Math.sin(da) * dl;
     }
-    if (kind === 'scorpion' && !dark) { quad.dispose(); geo.dispose(); continue; }
     geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3));
     geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 4));
     geo.setAttribute('iDart', new THREE.InstancedBufferAttribute(iDart, 3));
@@ -9434,10 +9420,6 @@ function makeClutterTexture(kind, P, R) {
     return col.offsetHSL(0, R.range(-0.04, 0.02), R.range(-0.05, 0.04));
   };
   if (CLUTTER_GRAVEL[P.biomeKey] && P.biomeKey !== 'coast' && kind !== 'litter') {
-    /* drawn from a stream of their own; the builder's stream still takes
-       the draws the old painting took, so everything after it, the clock
-       included, stays where it was */
-    for (var burn = kind === 'stones' ? 49 : 280; burn > 0; burn--) R.f();
     R = RNG(P.base + '/clutter/' + kind);
     for (var vp = 0; vp < (kind === 'stones' ? 46 : 70); vp++) {
       var vx = R.range(0.08, 0.92) * S, vy = R.range(0.08, 0.92) * S;
