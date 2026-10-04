@@ -9121,9 +9121,11 @@ function buildRidges(scene, P, R, U) {
       var n2 = fbm2(x * 0.0005, seed * 0.3, seed + 7, 2);
       var y = (n * 0.75 + Math.abs(n2) * 0.55) * height * rough - height * 0.15;
       if (mesa) {
-        /* terraced: each band rises in a short cliff and runs flat */
+        /* terraced: each band runs nearly flat, then rises in a short cliff
+           to the next; the two shares add up to one band, so the profile
+           meets the next band's foot without a notch */
         var stp = height * 0.34, u = (y + height * 0.15) / stp, f = u - Math.floor(u);
-        y = (Math.floor(u) + smoothstep(0.72, 0.92, f) + 0.12 * Math.min(f, 0.72) / 0.72) * stp - height * 0.15;
+        y = (Math.floor(u) + 0.88 * smoothstep(0.72, 0.92, f) + 0.12 * Math.min(f, 0.72) / 0.72) * stp - height * 0.15;
       }
       top.push(y);
     }
