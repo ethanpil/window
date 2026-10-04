@@ -11055,8 +11055,12 @@ function updateWeather(t) {
     U.uAmbCol.value.multiplyScalar(1 + fl * 3.4);
     U.uSunCol.value.multiplyScalar(1 + fl * 0.6);
     U.uFogCol.value.lerp(new THREE.Color(0.86, 0.90, 1.0), fl * 0.55);
+    /* all round the horizon, not just toward the sun, and the air's own blue */
+    U.uFogAway.value.lerp(new THREE.Color(0.86, 0.90, 1.0), fl * 0.55);
+    U.uInScat.value.lerp(new THREE.Color(0.86, 0.90, 1.0), fl * 0.55);
     S.uZenith.value.lerp(new THREE.Color(0.80, 0.86, 1.0), fl * 0.8);
     S.uHorizon.value.lerp(new THREE.Color(0.92, 0.94, 1.0), fl * 0.8);
+    S.uHorizonAway.value.lerp(new THREE.Color(0.92, 0.94, 1.0), fl * 0.8);
     S.uCloudL.value.lerp(new THREE.Color(1.0, 1.0, 1.0), fl * 0.7);
     S.uCloudD.value.lerp(new THREE.Color(0.75, 0.78, 0.86), fl * 0.7);
   }
