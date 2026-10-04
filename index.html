@@ -5675,7 +5675,8 @@ function cityBuilding(C, R, lt, y, hgt, out, roofs) {
   /* the crown: a plant room set in from the top, or a spire */
   var cx = Math.max(sx - R.range(2, 5), 3), cz = Math.max(sz - R.range(2, 5), 3);
   var crown = box(cx, cz, at, crownH, 4, cWall(4), cGlass(4), false);
-  if (spire) crown.spire = Math.min(cx, cz);
+  /* a spire goes to buildRoofs with the roofs, which gives it no plant */
+  if (spire) { crown.spire = Math.min(cx, cz); roofs.push(crown); }
   crown.beacon = at + crownH > 90;                  /* metres above its street */
   return crown;
 }
@@ -8875,7 +8876,9 @@ function buildRoofs(scene, P, R, U, items) {
     var top = it[1] + it[3] * it[5];                  /* base + width * (height/width) */
     var w = it[3] * 0.5;
     var d = Math.sqrt(it[0] * it[0] + it[2] * it[2]);
-    if (it.spire) spires.push([it[0], top, it[2], it.spire * 1.1, it[4], R.range(2.5, 5.5), 1]);
+    /* a crown carries its spire and nothing else; its height comes from the
+       building's own seed so the builder stream is not drawn from */
+    if (it.spire) { spires.push([it[0], top, it[2], it.spire * 1.1, it[4], 2.5 + 3 * ((it[7] * 7.31) % 1), 1]); continue; }
     if (d > 700) continue;
     var r = R.f();
     /* placed in the building's own frame, turned with it, and kept inside
