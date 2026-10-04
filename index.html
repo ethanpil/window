@@ -7436,10 +7436,12 @@ function bridgeGeo(P, R, H) {
     var towH = drop * R.range(0.42, 0.72), tx = span * R.range(0.20, 0.30);
     for (i = -1; i <= 1; i += 2) {
       /* the legs go all the way down, to the river or the gorge side */
-      var legBot = Math.max(-drop, gAt(i * tx)) - 1.5;
-      for (var sgn = -1; sgn <= 1; sgn += 2) pushBox(B, i * tx, (towH + legBot) * 0.5, sgn * (deckW * 0.5 - 0.8), 1.1, (towH - legBot) * 0.5, 1.1, 0);
-      pushBox(B, i * tx, towH - 1.2, 0, 1.4, 0.7, deckW * 0.5, 0);
-      pushBox(B, i * tx, -th * 0.5 - 0.9, 0, 1.2, 0.6, deckW * 0.5, 0);      /* the cross-beam under the deck */
+      /* and stand beside the deck, their inner faces behind the kerb: on a
+         narrow deck legs set on it stood in the traffic lanes */
+      var legBot = Math.max(-drop, gAt(i * tx)) - 1.5, legZ = deckW * 0.5 + 0.6;
+      for (var sgn = -1; sgn <= 1; sgn += 2) pushBox(B, i * tx, (towH + legBot) * 0.5, sgn * legZ, 1.1, (towH - legBot) * 0.5, 1.1, 0);
+      pushBox(B, i * tx, towH - 1.2, 0, 1.4, 0.7, legZ, 0);
+      pushBox(B, i * tx, -th * 0.5 - 0.9, 0, 1.2, 0.6, legZ, 0);      /* the cross-beam under the deck */
     }
     /* The main cable hangs between the tower tops and dips to just above the
        deck at mid-span; past each tower a backstay runs down to an anchorage
@@ -7454,7 +7456,7 @@ function bridgeGeo(P, R, H) {
       return cTop + (0.4 - cTop) * v - 0.06 * (cTop - 0.4) * Math.sin(v * Math.PI);
     };
     for (var sgn2 = -1; sgn2 <= 1; sgn2 += 2) {
-      var zc = sgn2 * (deckW * 0.5 - 0.8);
+      var zc = sgn2 * (deckW * 0.5 - 0.2);           /* over the parapet, on the legs' inner edge */
       /* nodes: anchorage to tower, tower to tower, tower to anchorage, so
          there is always a node exactly on each tower top */
       var xs2 = [], q2;
@@ -7467,7 +7469,9 @@ function bridgeGeo(P, R, H) {
         var hx = (x0 + x1) * 0.5, hy2 = cableY(hx);
         if (i % 2 === 0 && hy2 > th * 0.5 + 0.4) pushBox(B, hx, (hy2 + th * 0.5) * 0.5, zc, 0.08, (hy2 - th * 0.5) * 0.5, 0.08, 0);
       }
-      for (i = -1; i <= 1; i += 2) pushBox(B, i * anchorX, 0.2, zc, 2.0, 1.2, 1.4, 0);   /* anchor blocks */
+      /* anchor blocks, beside the road on the approach, not on it, reaching
+         down into the bank as it slopes away */
+      for (i = -1; i <= 1; i += 2) pushBox(B, i * anchorX, -1.05, sgn2 * (deckW * 0.5 + 1.05), 2.0, 2.45, 1.4, 0);
     }
   } else if (kind === 'arch') {
     /* A steel arch springs from low on the gorge walls and rises to its crown
@@ -7588,7 +7592,9 @@ function buildBridge(scene, P, R, U, H) {
   App._shadows.push([0, P.bridgeDeck, P.bridgeZ, P.bridgeSpan * 0.22, 0.75, 2]);
   buildTraffic(scene, P, R, U, {
     x: 0, y: P.bridgeDeck + P.bridgeTh * 0.5 + 0.10, z: P.bridgeZ, len: P.bridgeRoad, dir: [1, 0],   /* the tarmac's top */
-    lanes: [-P.bridgeW * 0.22, P.bridgeW * 0.22], rate: P.trafficRate, speed: [20, 25], lift: 1
+    /* each lane in the middle of its half of the road: between the centre
+       line and the edge line (bridgeGeo), clear of the kerbs and towers */
+    lanes: [-(P.bridgeW * 0.5 - 1.6) * 0.5, (P.bridgeW * 0.5 - 1.6) * 0.5], rate: P.trafficRate, speed: [20, 25], lift: 1
   });
 }
 
