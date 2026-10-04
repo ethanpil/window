@@ -4883,6 +4883,8 @@ function buildFlowers(scene, P, R, U, H) {
 /* ---------- cacti, built as actual geometry ----------
    A saguaro is a ribbed column with arms that elbow out and turn up. Painted on
    a flat billboard it always reads as cardboard, so these are real tubes. */
+/* Mark the vertices from start on as a round surface, for finishGeo's weld. */
+function markSmooth(B, start) { (B.sm || (B.sm = [])).push(start, B.pos.length / 3); }
 function pushTube(B, path, radii, seg, ribs) {
   var start = B.pos.length / 3, i, j;
   var rn = ribs ? ribs.n : 0, ra = ribs ? ribs.amp : 0;
@@ -4932,6 +4934,7 @@ function pushTube(B, path, radii, seg, ribs) {
       B.idx.push(r0 + j2, r1 + j, r1 + j2);
     }
   }
+  markSmooth(B, start);
 }
 
 /* a straight or curved limb with a domed top */
@@ -4970,10 +4973,15 @@ function finishGeo(B) {
   /* A ring closes on a repeated vertex, so its seam carried two normals, one
      from the faces either side, and the light creased down every trunk,
      lighthouse and silo along it. Average the normals of vertices that share
-     a position where they nearly agree: that mends a seam and leaves the
-     hard edge of a box or a roof alone. */
+     a position where they nearly agree -- but only on round surfaces (B.sm:
+     the vertex ranges pushTube, pushCyl and a many-sided pushCone mark).
+     Welding by angle alone rounded off the hips of a roof, a pagoda's eaves
+     and a barn's ridge, which meet at under sixty degrees. */
   var nor = geo.attributes.normal.array, src = nor.slice(), pos = B.pos, groups = {}, i, a, b;
+  var sm = new Uint8Array(pos.length / 3), rs = B.sm || [];
+  for (i = 0; i < rs.length; i += 2) for (a = rs[i]; a < rs[i + 1]; a++) sm[a] = 1;
   for (i = 0; i < pos.length; i += 3) {
+    if (!sm[i / 3]) continue;
     var key = Math.round(pos[i] * 2e4) + ',' + Math.round(pos[i + 1] * 2e4) + ',' + Math.round(pos[i + 2] * 2e4);
     (groups[key] || (groups[key] = [])).push(i);
   }
@@ -6936,6 +6944,8 @@ function pushCone(B, cx, cy, cz, r, h, seg, invert, a0) {
     var o = start + i * 3;
     B.idx.push(o, o + 1, o + 2);
   }
+  /* four to six sides is a roof or a spire, its arrises sharp; more is round */
+  if (seg >= 8) markSmooth(B, start);
 }
 /* One flat convex face, wound so it faces away from ref (a point inside the
    solid): the roofs below are built from faces, and getting each winding
@@ -6992,6 +7002,7 @@ function pushCyl(B, cx, cy, cz, r0, r1, h, seg) {
     var o = start + i * 2;
     B.idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
   }
+  markSmooth(B, start);
 }
 
 var LANDMARKS = {
