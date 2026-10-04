@@ -3808,7 +3808,10 @@ function buildTerrain(scene, P, R, U, H) {
       GLSL_COMMON,
       'void main(){',
       '  if (vW.z > -0.18) discard;                       /* nothing of the outside exists indoors */',
-      '  vec3 c = texture2D(uTex, vW.xz * 0.038).rgb;',
+      '  vec3 c = texture2D(uTex, vW.xz * 0.038).rgb, c0 = c;',
+      /* the pixel's footprint on the ground, across both axes: one of them
+         alone stays small along a line of sight down that axis */
+      '  float fwW = max(fwidth(vW.x), fwidth(vW.z));',
       /* the broad octave turned through an irrational angle and shifted, so
          its repeats never line up with the fine one's; and a third, a
          kilometre and a half across, for drier and lusher stretches */
@@ -3848,7 +3851,7 @@ function buildTerrain(scene, P, R, U, H) {
       '  float fPatch = smoothstep(0.48, 0.80, vn(vW.xz * 0.045 + 7.3)) * uFlwK * grows;',
       '  vec2 fc = floor(vW.xz * 3.0);',
       '  float fh = h2(fc), fpick = h2(fc + 17.0);',
-      '  float kF = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 3.0);',
+      '  float kF = 1.0 - smoothstep(0.30, 0.85, fwW * 3.0);',
       '  vec3 fcol = fpick < 0.34 ? uFlw0 : (fpick < 0.67 ? uFlw1 : uFlw2);',
       '  vec3 favg = (uFlw0 + uFlw1 + uFlw2) / 3.0;',
       '  float fOn = mix(0.32, step(0.68, fh), kF) * fPatch * smoothstep(14.0, 26.0, dC);',
@@ -3888,6 +3891,7 @@ function buildTerrain(scene, P, R, U, H) {
          slip faces smooth fresh sand. Wind ripples, a hand's width apart, on
          the windward slopes only (a slip face is avalanched smooth), show
          when the sun is low across them; faded with their own footprint. */
+      '  float onPath = pathAmt(vW);',
       '  float slip = 0.0, duneY = 0.5, kDn = 0.0;',
       '  if (uDuneA.x > 0.01) {',
       '    vec4 dg = duneG(vW.xz, duneY);',
@@ -3925,17 +3929,16 @@ function buildTerrain(scene, P, R, U, H) {
       '    float grow = smoothstep(12.0, 26.0, length(uCamPos - vW));',
       '    c = mix(c, mix(uRowSoil, uRowCol, onRow), grow * kRow * 0.72);',
       '  }',
-      '  float onPath = pathAmt(vW);',
       /* earth grit: a coarse and a fine octave, the fine one faded out once its
          cells are smaller than a pixel so it cannot shimmer */
-      '  float kG = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 6.0);',
-      '  float dirt = vn(vW.xz * 1.3) * 0.55 + mix(0.5, vn(vW.xz * 6.0 + 17.0), kG) * 0.45;',
+      '  float kG = 1.0 - smoothstep(0.30, 0.85, fwW * 6.0), kG1 = 1.0 - smoothstep(0.30, 0.85, fwW * 1.3);',
+      '  float dirt = mix(0.5, vn(vW.xz * 1.3), kG1) * 0.55 + mix(0.5, vn(vW.xz * 6.0 + 17.0), kG) * 0.45;',
       /* A lane: tarmac with a broken, crumbling edge, a strip of worn verge
          beside it, paler wheel tracks, a dashed line down the middle. Its
          lines are box-filtered by the pixel's footprint. */
       '  if (uRoad > 0.5) {',
       '    vec2 pu = pathUV(vW);',
-      '    float fr = max(fwidth(vW.x), fwidth(vW.z));',
+      '    float fr = fwW;',
       '    float hw = uPathW + (vn(vec2(pu.x * 0.35, 3.1)) - 0.5) * 0.35 + (vn(vec2(pu.x * 1.7, 9.2)) - 0.5) * 0.14;',
       '    float onR = clamp((hw - pu.y) / fr + 0.5, 0.0, 1.0);',
       '    float verge = clamp((hw + 1.0 - pu.y) / fr + 0.5, 0.0, 1.0) * (1.0 - onR);',
@@ -4009,8 +4012,8 @@ function buildTerrain(scene, P, R, U, H) {
       /* the kept ground: a lawn mown in stripes, pale gravel, a bare yard, or a
          damp bank. The stripes fade once finer than a pixel. */
       '  float inClear = clearAmt(vW);',
+      '  float kM = 1.0 - smoothstep(0.30, 0.85, fwW * 0.56);',   /* outside the branch: derivatives in one are undefined */
       '  if (inClear > 0.001) {',
-      '    float kM = 1.0 - smoothstep(0.30, 0.85, fwidth(vW.x) * 0.56);',
       '    vec3 lawn = uCoverCol * (0.80 + 0.30 * fine.g) * (1.0 + 0.07 * sin(vW.x * 3.49) * kM);',
       '    vec3 gravel = mix(vec3(0.60, 0.58, 0.54), uPathCol, 0.35) * (0.74 + 0.30 * dirt + 0.22 * grit.r * near);',
       '    vec3 yard = uPathCol * (0.82 + 0.34 * dirt);',
@@ -4144,7 +4147,7 @@ function buildTerrain(scene, P, R, U, H) {
       '    c = mix(c, mix(vec3(0.80, 0.74, 0.64), uPathCol, 0.3) * (0.80 + 0.36 * dirt), wash * 0.85);',
       '    rivM = uRiver * onFloor * (1.0 - smoothstep(0.85 - fq / uCan2.z, 0.85 + fq / uCan2.z, chanD)) * (1.0 - bar);',
       '    c *= 1.0 - 0.35 * uRiver * wash * (1.0 - rivM);',          /* the wet margin */
-      '    rivS = vn(vec2(ca_ * 0.05 - uTime * 0.7, cp_ * 0.45)) * (1.0 - smoothstep(0.3, 0.85, fwidth(ca_) * 0.05));',
+      '    rivS = vn(vec2(ca_ * 0.05 - uTime * 0.7, cp_ * 0.45)) * (1.0 - smoothstep(0.3, 0.85, max(fwidth(ca_) * 0.05, fwidth(cp_) * 0.45)));',
       '  }',
       /* The shore. Ground the water has just left, or laps over, is dark with
          it and takes a sheen of sky (below), in a band whose width wanders
