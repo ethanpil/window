@@ -1205,15 +1205,13 @@ function buildParams(seedStr, nonce) {
     P.canyonSteps = LR.int(3, 7);
     P.strata = LR.int(7, 16);
     P.hasCanyonRiver = LR.chance(0.55);
-    /* The floor is the nominal depth plus noise of up to 1.75m either way,
-       so a river only 0.4 to 1.6m above that depth left banks of dry floor
-       standing through it: a hard-edged brown island in the middle of the
-       water. Set the river above anything the floor can reach. */
-    var cRiverY = LR.range(2.1, 3.4);
-    /* The river runs in its own channel down the middle of the floor, not
-       wall to wall: its surface a metre below the floor, over a bed a metre
-       and a half deeper (the draw keeps its old range and is remapped). */
-    if (P.hasCanyonRiver) { P.waterY = -P.canyonDepth - 1.4 - (cRiverY - 2.1) / 1.3 * 0.4; P.shoreZ = -60; P.waterKind = 'flow'; P.flowDown = 1; }
+    /* The river is painted on the floor by the terrain shader, down the
+       inner channel (P._inRiver), not a water surface: the mesh hundreds of
+       metres out is too coarse to cut a channel for one. So the canyon has
+       no P.waterY (one set below the floor drew a plane nothing could see,
+       floated a boat under the gravel and let plants stand in the river).
+       This draw once set its level; it is kept so the stream runs on alike. */
+    LR.range(2.1, 3.4);
     /* The window used to hang over the middle of the canyon, as high above
        its floor as the canyon is deep. It stands on the rim now, a ledge of
        rimrock in front, with the canyon running across the view below and
@@ -3222,6 +3220,12 @@ function makeHeightField(P) {
     /* where the channel runs, for the willows along it: world x, z at a
        along the axis, off metres across from the channel's middle */
     P._chanXZ = function (a, off) { var q = ccAt(a) + off - p0; return [a * ksa + q * kca, -a * kca + q * ksa]; };
+    /* is x, z in the painted river? The shader's edge sits at 0.85 of the
+       channel's half width, wandering by up to 0.075 */
+    P._inRiver = P.hasCanyonRiver ? function (x, z) {
+      var a = x * ksa - z * kca;
+      return Math.abs(x * kca + z * ksa + p0 - ccAt(a)) < cwc * 0.9;
+    } : null;
     return function (x, z) {
       var d = Math.sqrt(x * x + z * z);
       var a = x * ksa - z * kca, p = x * kca + z * ksa + p0;
@@ -4322,14 +4326,6 @@ function buildWater(scene, P, R, U) {
     uMirror: { value: mirror ? 1.0 : 0.0 },
     uZenith: App.skyU.uZenith, uCloudL: App.skyU.uCloudL, uCloudD: App.skyU.uCloudD
   };
-  /* A desert river is thick with silt, green-brown and opaque a hand down,
-     and it runs down the canyon, not across the view */
-  if ((P.terrainKind || P.biome.terrain) === 'canyon') {
-    uni.uFlowDir.value.set(Math.sin(P.canyonAng || 0), -Math.cos(P.canyonAng || 0));
-    uni.uDeep.value.set(ihash(1, 2, P.terrainSeed) < 0.5 ? '#3b3a26' : '#40382a');
-    uni.uShallow.value.set(ihash(3, 4, P.terrainSeed) < 0.5 ? '#7a6e48' : '#86744e');
-    uni.uAbs.value = 2.4;
-  }
   var mat = new THREE.ShaderMaterial({
     extensions: { derivatives: true },
     uniforms: uni,
@@ -9510,6 +9506,7 @@ function buildClutter(scene, P, R, U, H) {
       var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
       if (z > -0.9) continue;
       if (P.waterY != null && H(x, z) < P.waterY + 0.2) continue;
+      if (P._inRiver && P._inRiver(x, z)) continue;
       /* a worn path is where nothing low grows */
       if (kind === 'tufts' && P.pathKind && onPathAt(P, x, z) > 0.3) continue;
       if (P.pathKind === 'lane' && onPathAt(P, x, z) > 0.05) continue;   /* a road is kept clear */
@@ -9873,7 +9870,7 @@ function buildProps(scene, P, R, U, H) {
         var rq = P._chanXZ(ra, rs * ((P.chanW || 12) * 0.9 + RP.range(0, 9)));
         var rd = Math.hypot(rq[0], rq[1]);
         if (rd > 1100 || Math.abs(Math.atan2(rq[0], -rq[1])) > lim) continue;
-        if (H(rq[0], rq[1]) < P.waterY + 0.3 || slopeAt(H, rq[0], rq[1]) > 0.35) continue;
+        if (P._inRiver(rq[0], rq[1]) || slopeAt(H, rq[0], rq[1]) > 0.35) continue;
         rip.push([rq[0], rq[1], RP.range(2.5, 7)]);
       }
     }
