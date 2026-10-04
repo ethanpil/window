@@ -9350,7 +9350,11 @@ function buildCritters(scene, P, R, U, H) {
     geo.setAttribute('iDart', new THREE.InstancedBufferAttribute(iDart, 3));
     geo.instanceCount = n;
     var mat = new THREE.ShaderMaterial({
-      uniforms: { uTime: U.uTime, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol, uMap: { value: makeCritterTexture(kind) } },
+      /* the clock drifts on after the build, so each kind keeps its own
+         hours as it goes: scorpions go to ground as the sky pales toward
+         dawn, lizards once the sun is down */
+      uniforms: { uTime: U.uTime, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol, uMap: { value: makeCritterTexture(kind) },
+        uNight: App.skyU.uNight, uNoct: { value: kind === 'scorpion' ? 1 : 0 } },
       transparent: true, depthWrite: false, alphaTest: 0.02, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
       vertexShader: [
@@ -9377,8 +9381,10 @@ function buildCritters(scene, P, R, U, H) {
       ].join('\n'),
       fragmentShader: [
         GLSL_TONE,
-        'uniform sampler2D uMap; varying vec2 vUv; varying vec3 vTint;',
-        'void main(){ vec4 t = texture2D(uMap, vUv); if (t.a < 0.02) discard;',
+        'uniform sampler2D uMap; uniform float uNight, uNoct; varying vec2 vUv; varying vec3 vTint;',
+        'void main(){ vec4 t = texture2D(uMap, vUv);',
+        '  t.a *= mix(1.0 - smoothstep(0.0, 0.4, uNight), smoothstep(0.2, 0.7, uNight), uNoct);',
+        '  if (t.a < 0.02) discard;',
         '  gl_FragColor = vec4(tone(t.rgb * vTint), t.a); }'
       ].join('\n')
     });
