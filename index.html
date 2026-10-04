@@ -2992,6 +2992,14 @@ function duneAt(D, x, z) {
   return A * y * smoothstep(D.r0, D.r1, d);
 }
 
+/* A dry wash cuts across an erg on the path's own curve and levels the
+   dunes across it: how much (0..1), and the dune height the ground keeps.
+   The heightfield, plantable() and the grass all read the same one. */
+function washAt(P, x, z) { return P.pathKind === 'wash' ? smoothstep(0.0, 0.6, onPathAt(P, x, z)) : 0; }
+function ergDuneAt(P, x, z, wa) {
+  return duneAt(P.dune, x, z) * (1 - 0.9 * (wa == null ? washAt(P, x, z) : wa));
+}
+
 function makeHeightField(P) {
   var s = P.terrainSeed, amp = P.hillAmp, f = P.hillFreq, far = P.farHills;
   var kind = P.terrainKind || P.biome.terrain;
@@ -3017,15 +3025,14 @@ function makeHeightField(P) {
     /* A dry wash: a flat floor cut into the land, the dunes levelled across
        it, half a metre to a metre deep, on the path's own curve */
     var wcut = P.pathKind === 'wash' ? 0.5 + (P.pathW - 5) / 9 * 0.5 : 0;
-    var washAt = function (x, z) { return wcut ? smoothstep(0.0, 0.6, onPathAt(P, x, z)) : 0; };
     if (P.erg) {
       /* the dunes fade from the mesh where its grid can no longer carry a
          slip face; the shader keeps drawing them in the light beyond */
       var dfar = clamp(DU.lam * 5, 450, 1300);
       return function (x, z) {
         var d = Math.sqrt(x * x + z * z);
-        var wa = washAt(x, z);
-        var h = duneAt(DU, x, z) * (1 - smoothstep(dfar, dfar * 1.6, d)) * (1 - 0.9 * wa) - wa * wcut;
+        var wa = washAt(P, x, z);
+        var h = ergDuneAt(P, x, z, wa) * (1 - smoothstep(dfar, dfar * 1.6, d)) - wa * wcut;
         h += fbm2(x * 0.02, z * 0.02, s, 3) * 0.35 * smoothstep(4, 40, d);
         h += ridged(x * f * 0.03, z * f * 0.03, s + 303, 3) * Math.min(mesa, 30) * 0.8 * smoothstep(900, 1600, d);
         return h;
@@ -3053,7 +3060,7 @@ function makeHeightField(P) {
       var apron = smoothstep(0.16 - w * 3, 0.16, m);
       h += mesa * (top * 0.86 + apron * apron * 0.14) + top * fbm2(x * 0.01, z * 0.01, s + 9, 2) * mesa * 0.03;
       h += ridged(x * f * 0.03, z * f * 0.03, s + 303, 3) * mesa * 0.8 * smoothstep(900, 1600, d);
-      return h - washAt(x, z) * wcut;
+      return h - washAt(P, x, z) * wcut;
     };
   }
   if (kind === 'cliff') {
@@ -3896,7 +3903,8 @@ function buildTerrain(scene, P, R, U, H) {
       '  if (uDuneA.x > 0.01) {',
       '    vec4 dg = duneG(vW.xz, duneY);',
       '    float fwD = fwidth(dg.w), fD = fract(dg.w), rD = 1.0 - uDuneD.w;',
-      '    kDn = 1.0 - smoothstep(0.03, 0.25, fwD);',
+      /* a wash levels the dunes across it (ergDuneAt), so their light goes too */
+      '    kDn = (1.0 - smoothstep(0.03, 0.25, fwD)) * (1.0 - 0.9 * uWash * smoothstep(0.0, 0.6, onPath));',
       '    float eD = max(fwD * 1.5, 1e-4);',
       '    slip = mix(uDuneD.w, clamp((fD - rD) / eD + 0.5, 0.0, 1.0) * clamp((1.0 - fD) / eD + 0.5, 0.0, 1.0), kDn);',
       '    duneY = mix(0.5, duneY, kDn);',
@@ -4544,7 +4552,8 @@ function buildGrass(scene, P, R, U, H) {
     if (z > -0.6) return 0;
     if (Math.abs(Math.atan2(x, -z)) > 1.30) return 0;
     if (P.pathKind && onPathAt(P, x, z) > GR.f() * 0.55) return 0;
-    if (P.erg && duneAt(P.dune, x, z) > P.dune.hd * 0.18) return 0;
+    if (P.erg && ergDuneAt(P, x, z) > P.dune.hd * 0.18) return 0;
+    if (P._inRiver && P._inRiver(x, z)) return 0;
     /* an oasis grows by its water; on the sand round it, a rare tussock */
     if (P.oasisW && H(x, z) > P.waterY + 4.5 && GR.f() > 0.02) return 0;
     var hm = 1;
@@ -9757,8 +9766,9 @@ function scatterGroups(P, H, spec, grow, lim, S) {
 
 function plantable(P, H, x, z, maxSlope) {
   if (P.waterY != null && H(x, z) < P.waterY + 0.25) return false;
+  if (P._inRiver && P._inRiver(x, z)) return false;
   /* in an erg, only the hollows between the dunes hold anything */
-  if (P.erg && duneAt(P.dune, x, z) > P.dune.hd * 0.22) return false;
+  if (P.erg && ergDuneAt(P, x, z) > P.dune.hd * 0.22) return false;
   if (maxSlope && slopeAt(H, x, z) > maxSlope) return false;
   if (P.clearKind && clearAt(P, x, z + 0.6) > 0) return false;
   /* nothing grows up between the wheel ruts big enough to stop a tractor */
