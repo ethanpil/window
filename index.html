@@ -7198,6 +7198,17 @@ function visibleHalfAngle(P) {
   var O = openingFor(P.win, BUILD_ASPECT);
   return Math.atan((O.glassW * 0.5 + P.win.frame + 0.012) / O.d);
 }
+/* The same for a phone held upright (9:16), the narrowest window there is:
+   what is put there to be looked at -- a landmark, a herd, a fall, a boat --
+   stands inside it, so a narrow screen does not lose it behind the wall.
+   General scatter keeps the 16:9 wedge. A constant shape, so the world is
+   still the same at every window size. */
+var FEATURE_ASPECT = 9 / 16;
+function featureHalfAngle(P, aspect) {
+  if (!P.win || !P.win.glassH) return Math.atan(0.5 / 2.1);
+  var O = openingFor(P.win, aspect || FEATURE_ASPECT);
+  return Math.atan(O.glassW * 0.5 / O.d);
+}
 
 function buildLandmark(scene, P, R, U, H) {
   if (/penthouse|bridge|cascade|canyon/.test(P.biomeKey)) { App.landmark = null; return; }
@@ -7217,7 +7228,10 @@ function buildLandmark(scene, P, R, U, H) {
   if (!opts.length || !present) { App.landmark = null; return; }
   /* off to one side but inside the glass: a landmark you cannot see is no
      landmark at all. The bare view has no frame, so it sees a little wider. */
-  var lim = visibleHalfAngle(P) * (App.bare ? 1.05 : 0.80);
+  var lim = featureHalfAngle(P) * (App.bare ? 1.05 : 0.80);
+  /* where the middle of the view is sea or cliff, look wider after twenty
+     tries: inside a 4:3 window, then the 16:9 one, rather than have none */
+  var lims = [lim, featureHalfAngle(P, 4 / 3) * (App.bare ? 1.05 : 0.80), visibleHalfAngle(P) * (App.bare ? 1.05 : 0.80)];
   var side = R.f() < 0.5 ? -1 : 1;
   /* How far off it can stand and still be read. Fog sets one limit: past it
      the landmark is the colour of the air. Its own height sets the other: a
@@ -7242,24 +7256,49 @@ function buildLandmark(scene, P, R, U, H) {
     }
     return false;
   };
-  var a, dist, x, z;
+  /* the ground under each corner of its footprint: a centre on dry land
+     still put a lighthouse's corner in the sea */
+  var lgeo = null, bb = null, cornerY = function (px, pz, q) {
+    return H(px + (q & 1 ? bb.max.x : bb.min.x) * sz * 0.9, pz + (q & 2 ? bb.max.z : bb.min.z) * sz * 0.9);
+  };
+  /* nor a corner in the water, nor a footprint on a slope so steep the
+     building would be buried to the eaves on its uphill side */
+  var cornersWet = function (px, pz) {
+    if (kind === 'jetty') return false;
+    var lo = 1e9, hi = -1e9;
+    for (var q = 0; q < 4; q++) { var h = cornerY(px, pz, q); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+    return (P.waterY != null && lo < P.waterY + 0.6) || hi - lo > Math.max(2.5, sz * 0.2);
+  };
+  var a, dist, x, z, ok = false;
   for (var att = 0; att < 40; att++) {
-    a = side * R.range(lim * 0.22, lim);
+    var lt = lims[att < 20 ? 0 : (att < 30 ? 1 : 2)];
+    a = side * R.range(lt * 0.22, lt);
     dist = R.range(near, far);
     x = Math.sin(a) * dist; z = -Math.cos(a) * dist;
-    if (!wet(x, z)) break;
+    if (!wet(x, z)) {
+      /* the shape is drawn at the first dry centre, where it always was */
+      if (!lgeo) { lgeo = landmarkGeo(kind, R); lgeo.computeBoundingBox(); bb = lgeo.boundingBox; }
+      if (!cornersWet(x, z)) { ok = true; break; }
+    }
     side = -side;
   }
-  if (wet(x, z)) { App.landmark = null; return; }
-  var lgeo = landmarkGeo(kind, R);
-  /* level on the lowest corner of its own footprint, sunk a little: set on the
-     centre it stood on air down the slope. The plinth fills the uphill side. */
-  lgeo.computeBoundingBox();
-  var bb = lgeo.boundingBox, y = H(x, z);
-  for (var cq = 0; cq < 4; cq++)
-    y = Math.min(y, H(x + (cq & 1 ? bb.max.x : bb.min.x) * sz * 0.9, z + (cq & 2 ? bb.max.z : bb.min.z) * sz * 0.9));
-  y -= 0.1;
+  if (!ok) { if (lgeo) lgeo.dispose(); App.landmark = null; return; }
+  /* Level on the lowest corner of its own footprint, sunk a little (set on
+     the centre it stood on air down the slope), but never more than a metre
+     and a quarter under the centre: on a steep hillside the lowest corner
+     buried the building to its eaves. The plinth goes down to the lowest
+     corner instead, and fills the uphill side. */
+  var yc = H(x, z), lo = yc;
+  for (var cq = 0; cq < 4; cq++) lo = Math.min(lo, cornerY(x, z, cq));
+  var y = Math.max(lo, yc - 1.25) - 0.1;
   if (kind === 'jetty' && P.waterY != null) y = P.waterY - 0.4;
+  else {
+    var foot = -(y - lo + 0.3) / sz, lp = lgeo.attributes.position;
+    if (foot < -0.15) {
+      for (var vi = 0; vi < lp.count; vi++) if (lp.getY(vi) < -0.149) lp.setY(vi, foot);
+      lp.needsUpdate = true;
+    }
+  }
   var mat = solidMat(U, L.body, { rib: 0, grain: 0, spines: 0, body2: L.trim, twoTone: 1, facade: LANDMARK_FACADE[kind] });
   instanceSolid(scene, lgeo, [[x, y, z, sz, 0, 1, 1]], mat);
   App._shadows.push([x, y, z, sz * 0.30, 0.85, sz]);
@@ -8612,7 +8651,7 @@ function buildHerd(scene, P, R, U, H) {
   var kind = R.pick(opts), Hd = HERDS[kind];
   var n = R.int(Hd.n[0], Hd.n[1]);
   /* the herd keeps together: one centre, animals scattered around it */
-  var hlim = visibleHalfAngle(P) * 0.85;
+  var hlim = featureHalfAngle(P) * 0.85;
   var ha = R.range(-hlim, hlim), hr = R.range(45, 210);
   var hx = Math.sin(ha) * hr, hz = -Math.cos(ha) * hr;
   if (P.waterY != null && H(hx, hz) < P.waterY + 0.6) return;
@@ -8850,11 +8889,17 @@ function buildWaterLife(scene, P, R, U, H) {
 
   /* a boat, moored or drifting */
   if (R.f() < 0.5) {
-    var bs = spots[R.int(0, spots.length - 1)];
+    /* moored where a narrow window still sees it (featureHalfAngle) */
+    var bLim = featureHalfAngle(P) * 0.85, bSpots = spots.filter(function (q) { return Math.abs(Math.atan2(q[0], -q[1])) < bLim; });
+    var bs = (bSpots.length ? bSpots : spots)[R.int(0, (bSpots.length || spots.length) - 1)];
     var bmat = solidMat(U, R.pick(['#7a6448', '#8d6f4e', '#5f5a54', '#a8452f', '#3f5a72']), { rib: 0, grain: 1, spines: 0, barkN: 26, barkPlate: 9 });
-    instanceSolid(scene, boatGeo(R), [[bs[0], wy - 0.10, bs[1], R.range(1.6, 2.6), R.range(0, 6.283), 1, 1]], bmat);
-    P.hasBoat = true;
-    App._features.push(['boat', bs[0], bs[1]]);
+    /* drawn for whether or not there is room for it, so the stream runs on alike */
+    var bGeo = boatGeo(R), bItem = [bs[0], wy - 0.10, bs[1], R.range(1.6, 2.6), R.range(0, 6.283), 1, 1];
+    if (bSpots.length) {
+      instanceSolid(scene, bGeo, [bItem], bmat);
+      P.hasBoat = true;
+      App._features.push(['boat', bs[0], bs[1]]);
+    } else { bGeo.dispose(); bmat.dispose(); }
   }
 
   var kinds = [];
@@ -10140,7 +10185,7 @@ function buildFalls(scene, P, R, U, H) {
   var picks = [], guard = 0;
   while (picks.length < P.falls && guard < 900) {
     guard++;
-    var flim = visibleHalfAngle(P) * 0.92;
+    var flim = featureHalfAngle(P) * 0.92;
     var a = R.range(-flim, flim), rr = R.range(90, 340);
     var x = Math.sin(a) * rr, z = -Math.cos(a) * rr;
     var top = H(x, z);
