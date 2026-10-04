@@ -4023,8 +4023,8 @@ function buildTerrain(scene, P, R, U, H) {
       '    float inB = clamp(-ac / fq + 0.5, 0.0, 1.0), built = step(uCityBuilt, length(blk * uCity.z));',
       '    cc = mix(cc, plaza, inB);',
       '    c = mix(c, cc, zone * (1.0 - inB * (1.0 - built)));',
-      /* lamps every 26 m down each pavement, staggered across the street */
-      '    float la = (fract((al + 13.0 * step(0.0, ns ? sg.x : sg.y)) / 26.0) - 0.5) * 26.0, lx = ac - sk + 0.7;',
+      /* a lamp every CITY_LAMP m down each pavement, staggered across the street */
+      '    float la = (fract((al + ' + (CITY_LAMP / 2).toFixed(1) + ' * step(0.0, ns ? sg.x : sg.y)) / ' + CITY_LAMP.toFixed(1) + ') - 0.5) * ' + CITY_LAMP.toFixed(1) + ', lx = ac - sk + ' + CITY_LAMP_IN.toFixed(2) + ';',
       '    float r2 = la * la + lx * lx;',
       '    pool = zone * step(-2.0, ac) * (exp(-r2 / 50.0) * 0.45 + exp(-r2 / 9.0) * 0.8);',
       '  }',
@@ -5609,6 +5609,10 @@ function cityPlan(P) {
    on top) so no window is cut off at a roofline. */
 var CITY_FLOOR = [3.8, 3.2, 3.6, 3.4, 4.0];
 var CITY_LOBBY = 5.2, CITY_PARAPET = 1.2;
+/* Street lamps stand every CITY_LAMP metres down each pavement, staggered by
+   half that across the street, CITY_LAMP_IN in from the kerb: cityStreets
+   plants them and the ground draws their pools of light to the same numbers. */
+var CITY_LAMP = 26, CITY_LAMP_IN = 0.7;
 var CITY_WALLS = [
   ['#4f6470', '#3d4a52', '#5e6262', '#465a66', '#5a5448'],
   ['#8a4e3a', '#9a5c44', '#b8a07f', '#7c6c5e', '#6e3f33', '#a46a4c'],
@@ -5996,17 +6000,19 @@ function cityMesh(scene, P, R, U, items) {
       '  float u = mix(vL.x * vSize.x, vL.z * vSize.z, side), span = mix(vSize.x, vSize.z, side);',
       '  float v = vL.y * vSize.y, vs = v + base;',
       /* the family: storey, bay, glass width (half, of a bay), sill and head
-         (of a storey), how much the glass reflects, corner margin */
-      '  float fh = 3.8, bay = 1.5, gx = 0.46, gy0 = 0.03, gy1 = 0.72, refl = 1.0, mar = 0.25;',
-      '  if (type > 0.5 && type < 1.5) { fh = 3.2; bay = 2.7; gx = 0.25; gy0 = 0.28; gy1 = 0.87; refl = 0.30; mar = 0.8; }',
-      '  else if (type > 1.5 && type < 2.5) { fh = 3.6; bay = 1.6; gx = 0.47; gy0 = 0.36; gy1 = 0.90; refl = 0.55; mar = 0.6; }',
-      '  else if (type > 2.5 && type < 3.5) { fh = 3.4; bay = 2.9; gx = 0.21; gy0 = 0.24; gy1 = 0.86; refl = 0.28; mar = 1.0; }',
+         (of a storey), how much the glass reflects, corner margin. Storeys,
+         lobby and parapet are the script's (CITY_FLOOR...), as cut. */
+      '  float fh = ' + CITY_FLOOR[0].toFixed(2) + ', bay = 1.5, gx = 0.46, gy0 = 0.03, gy1 = 0.72, refl = 1.0, mar = 0.25;',
+      '  if (type > 0.5 && type < 1.5) { fh = ' + CITY_FLOOR[1].toFixed(2) + '; bay = 2.7; gx = 0.25; gy0 = 0.28; gy1 = 0.87; refl = 0.30; mar = 0.8; }',
+      '  else if (type > 1.5 && type < 2.5) { fh = ' + CITY_FLOOR[2].toFixed(2) + '; bay = 1.6; gx = 0.47; gy0 = 0.36; gy1 = 0.90; refl = 0.55; mar = 0.6; }',
+      '  else if (type > 2.5 && type < 3.5) { fh = ' + CITY_FLOOR[3].toFixed(2) + '; bay = 2.9; gx = 0.21; gy0 = 0.24; gy1 = 0.86; refl = 0.28; mar = 1.0; }',
+      '  else if (type > 3.5) fh = ' + CITY_FLOOR[4].toFixed(2) + ';',
       '  float plant = step(3.5, type);',
       /* storeys over a lobby on the street, under a parapet; a whole number
          of bays across, so the corners are solid */
-      '  float lob = base < 0.5 ? 5.2 : 0.0;',
+      '  float lob = base < 0.5 ? ' + CITY_LOBBY.toFixed(2) + ' : 0.0;',
       '  float fv = (v - lob) / fh, fl = floor(fv), fy = fract(fv);',
-      '  float inF = step(0.0, v - lob) * step(v, vSize.y - 1.2);',
+      '  float inF = step(0.0, v - lob) * step(v, vSize.y - ' + CITY_PARAPET.toFixed(2) + ');',
       '  float usable = span - 2.0 * mar, nb = max(1.0, floor(usable / bay));',
       '  float cu = (u + 0.5 * span - mar) / usable * nb, ci = floor(cu), fx = fract(cu);',
       '  float inC = step(0.0, cu) * step(cu, nb);',
@@ -7941,7 +7947,7 @@ function buildGlows(scene, U, pts) {
   App.propMeshes.push(m);
 }
 
-/* Street trees down the pavements, a lamp every 26 m (where the ground
+/* Street trees down the pavements, a lamp every CITY_LAMP m (where the ground
    draws its pool of light), and the city's traffic: moving lanes and
    parked cars on four to six streets round the view. C: cityPlan. Streets
    are named by the grid line they run down: an x street at gx = (k + 0.5)
@@ -7949,7 +7955,7 @@ function buildGlows(scene, U, pts) {
 function cityStreets(scene, P, R, U, H, C, opt) {
   var SR = RNG(P.base + '/build/streets' + (P.nonce ? '/' + P.nonce : ''));
   var tSeed = SR.int(1, 9999);
-  var half = C.pitch * 0.5, lampIn = C.sk - 0.7;
+  var half = C.pitch * 0.5, lampIn = C.sk - CITY_LAMP_IN;
   var near = function (x, z) { return Math.sqrt(x * x + z * z); };
   var inRing = function (gx, gz) {
     /* a street is drawn where either block beside it is in the city */
@@ -7965,12 +7971,12 @@ function cityStreets(scene, P, R, U, H, C, opt) {
       var line = (k + 0.5) * C.pitch;                    /* the street's centre line */
       for (var sd = -1; sd <= 1; sd += 2) {
         /* sd: which pavement. The block on the -side has this pavement on
-           its + edge, where the ground's stagger is 0; the other, 13 m. */
-        var off = line + sd * (C.sw * 0.5 - lampIn), st = sd < 0 ? 0 : 13;
+           its + edge, where the ground's stagger is 0; the other, half a gap. */
+        var off = line + sd * (C.sw * 0.5 - lampIn), st = sd < 0 ? 0 : CITY_LAMP / 2;
         var treesHere = ihash(k * 7 + axis, sd + 3, tSeed) < (opt.trees || 0);
         var treeOff = line + sd * (C.sw * 0.5 - C.sk * 0.45);
-        for (var a = -reach; a <= reach; a += 26) {
-          var al = Math.round(a / 26) * 26 - st;
+        for (var a = -reach; a <= reach; a += CITY_LAMP) {
+          var al = Math.round(a / CITY_LAMP) * CITY_LAMP - st;
           var g = axis ? [al, off] : [off, al];
           var bc = axis ? [al, line + sd * half] : [line + sd * half, al];
           if (!inRing(bc[0], bc[1])) continue;
@@ -9576,12 +9582,15 @@ function buildClutter(scene, P, R, U, H) {
    path has its own frame: it passes through (pathX, pathZ) heading pathAng
    off straight ahead; u runs along it, v across. pathAmt in the terrain
    shader is the same sum, term for term. */
+function pathCentre(P, u) {          /* the centre line: v at u along the path */
+  return P.pathBend * (Math.sin(u * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase))
+       + P.pathBend2 * (Math.sin(u * P.pathK2 + P.pathPhase2) - Math.sin(P.pathPhase2));
+}
 function pathOff(P, x, z) {
   var sa = Math.sin(P.pathAng), ca = Math.cos(P.pathAng);
   var dx = x - P.pathX, dz = z - P.pathZ;
   var u = dx * sa - dz * ca, v = dx * ca + dz * sa;
-  var vc = P.pathBend * (Math.sin(u * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase))
-         + P.pathBend2 * (Math.sin(u * P.pathK2 + P.pathPhase2) - Math.sin(P.pathPhase2));
+  var vc = pathCentre(P, u);
   var dv = P.pathBend * 0.0042 * Math.cos(u * 0.0042 + P.pathPhase)
          + P.pathBend2 * P.pathK2 * Math.cos(u * P.pathK2 + P.pathPhase2);
   return Math.abs(v - vc) / Math.sqrt(1 + dv * dv);
@@ -10013,16 +10022,12 @@ function buildRoadPoles(scene, P, U, H) {
   var sa = Math.sin(P.pathAng), ca = Math.cos(P.pathAng);
   var side = TR.chance(0.5) ? 1 : -1, gap = TR.range(42, 52), off = P.pathW + TR.range(2.2, 3.2), u0 = TR.range(0, gap);
   var lim = Math.max(visibleHalfAngle(P) * 1.3, 0.9);
-  var vc = function (u) {
-    return P.pathBend * (Math.sin(u * 0.0042 + P.pathPhase) - Math.sin(P.pathPhase))
-         + P.pathBend2 * (Math.sin(u * P.pathK2 + P.pathPhase2) - Math.sin(P.pathPhase2));
-  };
   var poles = [], tops = [];
   for (var u = -1400 + u0; u < 1400; u += gap) {
-    var dv = (vc(u + 0.5) - vc(u - 0.5));
+    var dv = (pathCentre(P, u + 0.5) - pathCentre(P, u - 0.5));
     var tx = sa + dv * ca, tz = -ca + dv * sa, tl = Math.sqrt(tx * tx + tz * tz);
     var nx = -tz / tl, nz = tx / tl;
-    var v = vc(u) + side * off * Math.sqrt(1 + dv * dv);
+    var v = pathCentre(P, u) + side * off * Math.sqrt(1 + dv * dv);
     var x = P.pathX + u * sa + v * ca, z = P.pathZ - u * ca + v * sa;
     var d = Math.sqrt(x * x + z * z), ok = z < -6 && d < 650 && Math.abs(Math.atan2(x, -z)) < lim;
     var y = ok ? H(x, z) : 0;
