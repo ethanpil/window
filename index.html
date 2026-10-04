@@ -5200,7 +5200,7 @@ function solidMat(U, colour, opts) {
       'uniform float uTime, uFogDensity, uShadow, uSpin, uAoH, uLift;',
       'uniform vec3 uSunDir, uSunCol, uAmbCol, uBody, uFogCol;',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
-      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF; varying vec3 vMet; varying vec3 vNl;',
+      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF; varying vec3 vMet; varying vec3 vNl; varying vec2 vToCam;',
       GLSL_COMMON,
       'void main(){',
       '  float sc = iAttr.x, rot = iAttr.y;',
@@ -5231,6 +5231,11 @@ function solidMat(U, colour, opts) {
       '  vCol = uBody * hemi(n, uAmbCol * 1.1) * ao * mix(1.0, bk.y, 0.6 * (1.0 - uLift));',
       '  vCol *= 1.0 - 0.25 * uWet;',
       '  vRib = rib; vUp = position.y; vSeed = iAttr.y; vLocal = position; vNrm = n; vWp = wp; vMet = lp; vNl = nl;',
+      /* which way the camera lies in the object's own frame: a round wall
+         measures its courses round from there, so the seam where the angle
+         wraps is on the far side */
+      '  vec2 tc = cameraPosition.xz - iPos.xz;',
+      '  vToCam = normalize(vec2(tc.x * c + tc.y * s, tc.y * c - tc.x * s) + vec2(1e-5, 0.0));',
       '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
       '  float fH = fogAmtH(-mv.z, uFogDensity, wp.y);',
       '  vFogF = fH; vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, fH);',
@@ -5248,7 +5253,7 @@ function solidMat(U, colour, opts) {
          limit, which is what a mip-map would have done for a texture. */
       'float bandLimit(float x, float freq){ float w = fwidth(x) * freq; return 1.0 - smoothstep(0.30, 0.85, w); }',
       'varying vec3 vCol; varying float vRib; varying float vUp; varying float vSeed; varying vec3 vLocal; varying vec3 vNrm;',
-      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF; varying vec3 vMet; varying vec3 vNl;',
+      'varying vec3 vWp; varying vec3 vHaze; varying float vFogF; varying vec3 vMet; varying vec3 vNl; varying vec2 vToCam;',
       'uniform vec4 uFac; uniform vec3 uFac2;',
       'float h3(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }',
       /* smooth value noise: a hash alone is constant across its cell, which
@@ -5304,7 +5309,8 @@ function solidMat(U, colour, opts) {
       '    float wall = (1.0 - step(0.5, vRib)) * (1.0 - smoothstep(0.35, 0.6, abs(nl.y)));',
       '    float rnd = uFac2.z;',
       '    float rad = length(m.xz);',
-      '    float u = mix(abs(nl.x) > abs(nl.z) ? m.z : m.x, atan(m.z, m.x) * rad, rnd);',
+      '    float u = abs(nl.x) > abs(nl.z) ? m.z : m.x;',
+      '    if (rnd > 0.5) u = atan(dot(m.xz, vec2(-vToCam.y, vToCam.x)), dot(m.xz, vToCam) + 1e-5) * rad;',
       '    float v = m.y;',
       '    float wu = fwidth(u), wv = fwidth(v);',
       '    float kd = uFac.x, g = 1.0;',
