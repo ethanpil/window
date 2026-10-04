@@ -9799,7 +9799,8 @@ function buildProps(scene, P, R, U, H) {
     if (nearItems.length) buildNearTrees(scene, P, R, U, H, spec.kind, nearItems, spec);
     for (var si2 = 0; si2 < items.length; si2++) {
       if (items[si2][3]) continue;                /* a sunk crown in the wood band */
-      if (treeish && Math.hypot(items[si2][0], items[si2][1]) < 48) continue;   /* cast by the solid tree */
+      /* (the solid trees, nearItems, cast their own; these are all billboards,
+         those in the 36-48 m band that lost the coin included) */
       /* a bush near the window casts its own open shape in the near map,
          its foot's shade staying in the coarse one */
       var ix = items[si2][0], iz = items[si2][1], iy = H(ix, iz), isz = items[si2][2];
