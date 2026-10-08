@@ -23,7 +23,7 @@ var seeds = lib.option('seeds') ? lib.option('seeds').split(',') : ['8badf00d', 
 var locks = lib.option('locks') ? lib.option('locks').split(';') : [
   't=afternoon,w=clear,v=bare', 't=night,w=rainstorm,v=bare', 't=golden,w=fair', 's=winter,w=snowfall,v=bare'
 ].slice(0, quick ? 2 : 4);
-var maxFrame = lib.number('max-frame', 400);
+var maxFrame = lib.number('max-frame', 400), stallMs = Math.max(10000, maxFrame * 11);
 var shots = lib.option('shots', '');
 
 /* driver chatter is not the page's; the 96x96 resize warning is WebGL1's own */
@@ -43,10 +43,11 @@ function wanted(biome, lock) {
   return want;
 }
 
-/* ten animation frames; the median gap between them, or null if they stall */
-function frames() {
+/* ten animation frames; the median gap between them, or null if they stall
+   (take longer than ten frames at the --max-frame limit, and at least 10 s) */
+function frames(stallMs) {
   return new Promise(function (res) {
-    var gaps = [], last = null, timer = setTimeout(function () { res(null); }, 10000);
+    var gaps = [], last = null, timer = setTimeout(function () { res(null); }, stallMs);
     (function f(t) {
       if (last != null) gaps.push(t - last);
       last = t;
@@ -93,8 +94,8 @@ function frames() {
     }
     if (webgl1 && got.webgl2 !== false) errs.push('--webgl1: renderer.capabilities.isWebGL2 is ' + got.webgl2 + ', not false');
 
-    var frameMs = await page.evaluate(frames);
-    if (frameMs == null) errs.push('animation frames stalled (10 frames took over 10 s)');
+    var frameMs = await page.evaluate(frames, stallMs);
+    if (frameMs == null) errs.push('animation frames stalled (10 frames took over ' + (stallMs / 1000) + ' s)');
     else if (frameMs > maxFrame) errs.push('median frame time ' + frameMs.toFixed(1) + 'ms is over --max-frame ' + maxFrame + 'ms');
 
     var strip = await page.evaluate(function () { var e = document.getElementById('err'); return e && !e.hidden ? e.textContent : ''; });

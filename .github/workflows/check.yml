@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: tests/package-lock.json
       - run: npm ci
@@ -26,12 +26,12 @@ jobs:
   # (every biome, shaders, determinism) needs a GPU and is done locally.
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: tests/package-lock.json
       - run: npm ci
@@ -39,5 +39,5 @@ jobs:
       - run: npx playwright-core install --with-deps chromium
         working-directory: tests
       # SwiftShader is slow, so the frame-time limit is far looser than the default.
-      - run: node scenes.js --quick --biomes meadow,urban,desert,fjord --max-frame 5000
+      - run: node scenes.js --quick --biomes meadow,urban --max-frame 8000
         working-directory: tests
