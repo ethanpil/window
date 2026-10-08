@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0c0d">
+<title>A window, somewhere</title>
+<style>
+@@STYLE@@
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="fx"></canvas>
+<div id="vig"></div>
+<div id="curtain"></div>
+
+<div id="hud">
+  <button id="bClose" class="iconbtn" aria-label="Hide this bar" title="Hide this bar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <div class="row desc"><span id="note" aria-live="polite"></span></div>
+  <div class="row controls" id="rowControls">
+    <button id="bNew" title="Open a different window (R)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg><span>new view</span></button>
+    <button id="bShuffle" title="Same scene, new arrangement"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg><span>reshuffle</span></button>
+    <button id="bPanes" title="Show or hide the glazing bars"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="21"/></svg><span>panes: on</span></button>
+    <button id="bQual" title="Detail level"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span>detail: auto</span></button>
+    <button id="bAuto" title="Change the view on a timer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg><span>auto: off</span></button>
+    <button id="bSound" title="Ambient sound"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg><span>sound: off</span></button>
+    <button id="bMotion" title="View drifts with the pointer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg><span>motion: on</span></button>
+  </div>
+  <div class="row sub">
+    <span class="grp">
+      <button id="bPin" class="iconbtn" aria-pressed="false" aria-label="Keep this bar on screen" title="Keep this bar on screen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="pinhead" d="M9.5 3h5v5l3 3.2v2h-11v-2L9.5 8V3z"/><path d="M12 13.2V21"/></svg></button>
+      <button id="bRefresh" class="iconbtn" aria-label="New view" title="A new view (R)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/></svg></button>
+      <button id="bTools" class="iconbtn" aria-expanded="true" aria-controls="rowControls" aria-label="Show or hide the controls" title="Show or hide the controls"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      <button id="bPick" class="iconbtn" aria-expanded="false" aria-controls="pick" aria-label="Choose the ingredients" title="Choose the ingredients yourself"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 7h18M3 13h18M3 19h18"/><circle cx="9" cy="7" r="2.3" fill="var(--hudbg)"/><circle cx="16" cy="13" r="2.3" fill="var(--hudbg)"/><circle cx="7" cy="19" r="2.3" fill="var(--hudbg)"/></svg></button>
+    </span>
+    <span class="grp right">
+      <span class="lbl">Ingredients-Seed:</span>
+      <span id="codeval" title="Everything that decides this scene, and the seed"></span>
+      <button id="bCopy" class="iconbtn" aria-label="Copy the Ingredients-Seed" title="Copy the Ingredients-Seed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+      <button id="bPaste" class="iconbtn" aria-label="Paste an Ingredients-Seed" title="Paste an Ingredients-Seed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M9 13h6M9 17h4"/></svg></button>
+    </span>
+  </div>
+  <div id="pick" hidden>
+    <label>landscape<select id="selBiome"></select></label>
+    <label>weather<select id="selWeather"></select></label>
+    <label>light<select id="selTime"></select></label>
+    <label>window<select id="selWindow"></select></label>
+    <label>frame<select id="selFinish"></select></label>
+    <label>night<select id="selNight"><option value="">allowed</option><option value="off">never</option></select></label>
+    <label>clock<select id="selClock"><option value="">from the seed</option><option value="live">my local time</option></select></label>
+    <label>view<select id="selView"><option value="">window</option><option value="open">window open</option><option value="bare">no window at all</option></select></label>
+    <label>season<select id="selSeason"></select></label>
+    <button id="bClear">clear all</button>
+  </div>
+</div>
+
+<noscript><div style="position:fixed;inset:0;display:grid;place-items:center;color:#cfc3ad;
+  font:16px/1.6 Georgia,serif;text-align:center;padding:32px">
+  This window is drawn with JavaScript, which is currently turned off.</div></noscript>
+
+<div id="paste" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-labelledby="pasteLbl">
+    <label id="pasteLbl" for="pasteIn">Paste an Ingredients-Seed, or a seed</label>
+    <input id="pasteIn" spellcheck="false" autocomplete="off" placeholder="2032518e88dc13480000-3fa9c21e">
+    <div class="acts"><button id="pasteGo">open</button><button id="pasteNo">cancel</button></div>
+    <div id="pasteMsg"></div>
+  </div>
+</div>
+<div id="err" hidden></div>
+<div id="fallback">This window needs WebGL, and your browser isn&rsquo;t offering it.<br>Try a different browser, or enable hardware acceleration.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+'use strict';
+
+@@APP@@
+}
+})();
+</script>
+</body>
+</html>

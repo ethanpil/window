@@ -1,0 +1,167 @@
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #0a0a0b;
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+    touch-action: none;
+  }
+  #gl, #fx {
+    position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+  }
+  #fx { pointer-events: none; }
+  #vig {
+    position: fixed; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(130% 100% at 50% 44%, rgba(0,0,0,0) 42%, rgba(0,0,0,.34) 78%, rgba(0,0,0,.62) 100%);
+    mix-blend-mode: multiply;
+  }
+  #curtain {
+    position: fixed; inset: 0; background: #0a0a0b; pointer-events: none;
+    transition: opacity 620ms ease;
+  }
+  #curtain.gone { opacity: 0; }
+
+  /* ---- controls: a small brass plate resting at the bottom of the room ---- */
+  #hud {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: max(18px, env(safe-area-inset-bottom));
+    display: flex; flex-direction: column; align-items: stretch;
+    gap: 6px;
+    padding: 9px 16px 8px;
+    border-radius: 2px;
+    background: rgba(16,15,14,.5);
+    --hudbg: #1b1917;
+    border: 1px solid rgba(214,199,170,.16);
+    box-shadow: 0 10px 30px rgba(0,0,0,.4);
+    backdrop-filter: blur(9px) saturate(.9);
+    -webkit-backdrop-filter: blur(9px) saturate(.9);
+    color: #ddd3c2;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 900ms ease;
+    z-index: 5;
+    width: min(96vw, 1040px);
+  }
+  #hud.awake, #hud:focus-within { opacity: 1; pointer-events: auto; transition: opacity 200ms ease; }
+  #hud .row {
+    display: flex; align-items: center; justify-content: center;
+    flex-wrap: wrap; gap: 7px 13px;
+  }
+  /* The description changes length with every seed. On its own line it cannot
+     push the controls around, and each control is sized for its longest label
+     so toggling one never nudges its neighbours. */
+  #hud .row.desc { padding: 0 20px 1px; }   /* clear of the close button */
+  #hud .row.controls button { text-align: left; display: inline-flex; align-items: center; gap: 7px; }
+  #hud .row.controls button svg { width: 13px; height: 13px; flex: none; opacity: .85; }
+  #hud .row.controls button:hover svg { opacity: 1; }
+  #bNew    { min-width: 11.5ch; }
+  #bShuffle{ min-width: 12.5ch; }
+  #bPanes  { min-width: 14.5ch; }
+  #bQual   { min-width: 21.5ch; }
+  #bAuto   { min-width: 14.5ch; font-variant-numeric: tabular-nums; }
+  #bSound  { min-width: 14.5ch; }
+  #bMotion { min-width: 15.5ch; }
+  #bCopy, #bCode { min-width: 0; }
+  #hud .row.sub {
+    justify-content: space-between; flex-wrap: wrap;
+    gap: 6px 10px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(214,199,170,.12);
+  }
+  #hud .grp { display: inline-flex; align-items: center; gap: 8px; }
+  #hud .grp.right { margin-left: auto; }
+  #codeval {
+    font: 400 10.5px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: .05em; color: #e6dcc8; user-select: all; -webkit-user-select: all;
+  }
+  #paste {
+    position: fixed; inset: 0; z-index: 8; display: grid; place-items: center;
+    background: rgba(8,8,9,.55); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  }
+  #paste[hidden] { display: none; }
+  #paste .box {
+    width: min(92vw, 520px); padding: 16px 18px 14px; border-radius: 2px;
+    background: rgba(22,21,19,.96); border: 1px solid rgba(214,199,170,.22);
+    box-shadow: 0 18px 50px rgba(0,0,0,.5); color: #ddd3c2;
+  }
+  #paste label { display: block; font-size: 13px; font-style: italic; margin-bottom: 8px; }
+  #pasteIn {
+    width: 100%; font: 400 12.5px/1.3 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: #efe6d4; background: rgba(0,0,0,.35); border: 1px solid rgba(214,199,170,.28);
+    border-radius: 2px; padding: 8px 9px; outline: none;
+  }
+  #pasteIn:focus { border-color: #d8c9a4; }
+  #paste .acts { display: flex; gap: 14px; justify-content: flex-end; margin-top: 10px; }
+  #pasteMsg { font-size: 11.5px; color: #d9a08e; min-height: 1.2em; margin-top: 4px; }
+  .lbl {
+    font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+    opacity: .48; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  #hud .row.sub button { font-size: 10.5px; opacity: .8; }
+  #hud.notools .row.controls { display: none; }
+  #bPin.pinned .pinhead { fill: currentColor; }
+  #bPin.pinned { color: #f0e4c8; }
+  #bTools[aria-expanded="false"] { opacity: .55; }
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 3px; min-width: 0; border-bottom: 0; line-height: 0;
+  }
+  .iconbtn svg { width: 14px; height: 14px; display: block; }
+  #bPick svg { transition: transform 320ms ease; }
+  #bPick[aria-expanded="true"] { color: #fff5e2; }
+  #bPick[aria-expanded="true"] svg { transform: rotate(60deg); }
+  .iconbtn:hover, .iconbtn:focus-visible { color: #fff5e2; border-bottom: 0; }
+  #bClose { position: absolute; top: 2px; right: 4px; opacity: .45; }
+  #bClose svg { width: 12px; height: 12px; }
+  #bClose:hover, #bClose:focus-visible { opacity: 1; }
+  .iconbtn.done { color: #b9d6a8; }
+  #hud .row.sub button:hover { opacity: 1; }
+  #note {
+    font-size: 13.5px; letter-spacing: .01em; color: #cfc3ad; font-style: italic;
+    white-space: normal; text-align: center; max-width: 100%;
+  }
+  #note b { font-weight: 400; font-style: normal; color: #efe6d4; }
+  .rule { width: 1px; height: 20px; background: rgba(214,199,170,.2); flex: none; }
+  button {
+    font-family: inherit; font-size: 13px; color: #cfc3ad;
+    background: none; border: 0; padding: 4px 2px; cursor: pointer;
+    border-bottom: 1px solid transparent;
+  }
+  button:hover, button:focus-visible { color: #fff5e2; border-bottom-color: rgba(216,201,164,.55); outline: none; }
+  #hud small { font-size: 11px; opacity: .55; }
+
+  @media (prefers-reduced-motion: reduce) { #curtain { transition: none; } }
+  #pick {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(146px, 1fr));
+    gap: 8px 14px; padding: 10px 14px 6px; margin: 6px 6px 0;
+    border-top: 1px solid rgba(214,199,170,.12);
+  }
+  #hud:not(.awake) #pick { display: none; }
+  #pick[hidden] { display: none; }
+  #pick label {
+    display: flex; flex-direction: column; gap: 3px;
+    font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+    opacity: .55; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  #pick select {
+    font-family: inherit; font-size: 12px; letter-spacing: 0; text-transform: none;
+    color: #e6dcc8; background: rgba(28,26,24,.9);
+    border: 1px solid rgba(214,199,170,.22); border-radius: 2px;
+    padding: 3px 4px; outline: none; opacity: 1;
+  }
+  #pick select:focus { border-color: #d8c9a4; }
+  #pick > button { align-self: end; min-width: 8ch; }
+  #err {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    max-width: min(920px, 92vw); padding: 8px 12px; z-index: 9;
+    font: 11.5px/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: #f3d9c9; background: rgba(60,18,12,.88); border: 1px solid rgba(255,170,140,.35);
+    border-radius: 2px; white-space: pre-wrap; word-break: break-word; cursor: pointer;
+  }
+  #err[hidden] { display: none; }
+  #fallback {
+    position: fixed; inset: 0; display: none; place-items: center; text-align: center;
+    color: #cfc3ad; padding: 32px; font-size: 16px; line-height: 1.6;
+  }
