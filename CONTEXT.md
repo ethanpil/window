@@ -30,6 +30,7 @@ src/js/NN-name.js   the script in 36 slices, joined in file-name order inside
 src/shaders/        GLSL: one .vert/.frag per material, shared pieces as .glsl
 build.js            node build.js  → writes index.html
                     node build.js --check → fails if index.html is stale
+                    node build.js --where N → the source of index.html line N
 ```
 
 **Edit `src/`, then run `node build.js`, and commit `index.html` with it.** CI
@@ -48,7 +49,15 @@ fails a push whose `index.html` doesn't match its `src/`.
   needs JavaScript values, write `{{KEY}}` in the file and build it with
   `shader('city.frag', { KEY: value })`, which throws on a missing or unused
   key. The build fails if the script names a shader file that doesn't exist.
-- Line endings are LF (`.gitattributes`), because `--check` compares bytes.
+- Line endings are LF (`.gitattributes`), because `--check` compares bytes. A
+  byte-order mark is stripped from sources.
+- The build refuses what the browser would only reject at run time: a file in
+  `src/js` not named `NN-name.js` (dotfiles are skipped), an include that isn't
+  in the table (case counts), a malformed `#include`, a file included twice into
+  one shader, a shader nothing uses, a templated shader read with `GLSL[...]`
+  instead of `shader()`, and a non-literal `GLSL[...]` lookup. `shader()` values
+  must be float literals — `3` or `NaN` would be a GLSL type error on one
+  landscape only.
 
 ### Checking a change
 
@@ -57,28 +66,43 @@ fails a push whose `index.html` doesn't match its `src/`.
 ```
 cd tests && npm install      once
 npm run test:static          ~5 s: build --check, node --check on the built
-                             script, ESLint (tests/eslint.json) — what CI runs
-npm test                     ~15 min: static, then the browser tests
+                             script, ESLint (tests/eslint.json)
+npm test                     ~20 min: static, then the browser tests
+npm test -- --quick          the same with one seed / two lock sets in
+                             scenes.js and shaders.js
 ```
 
-- `static.js` — findings already in the code are listed in
-  `tests/eslint-known.json` and don't fail; any new error does. Shrink that list,
-  never grow it.
+- `static.js` — any ESLint error fails; findings are printed as
+  `src/js/NN-name.js:line`. There is no baseline of known findings.
 - `scenes.js` — every landscape loads with no page error, console error or
-  warning, or text in the error strip `#err`. Default: 27 biomes × 2 seeds ×
-  `t=afternoon,w=clear,v=bare` and `t=night,w=rainstorm,v=bare`. Narrow it with
-  `--biomes urban,desert --seeds 8badf00d --locks "t=golden,w=fair"`, and add
-  `--shots out` to write screenshots — then **look** at them.
+  warning, or text in the error strip `#err`; the scene is the biome asked for
+  (and the locked weather, time and season); a few frames render at a median
+  under `--max-frame` (400 ms). Default: every biome in the page × 2 seeds ×
+  `t=afternoon,w=clear,v=bare`, `t=night,w=rainstorm,v=bare`, `t=golden,w=fair`
+  and `s=winter,w=snowfall,v=bare`. `--quick` is 1 seed × the first two. Narrow
+  it with `--biomes urban,desert --seeds 8badf00d --locks "t=golden,w=fair"`,
+  and add `--shots out` to write screenshots — then **look** at them.
+  `--webgl1` runs the same loop with WebGL2 disabled and checks the page really
+  ran on WebGL1 (the 96×96 resize warning is ignored in that mode only).
 - `reshuffle.js` — `seed` and `seed#3` give the same scene description (`#note`,
   metre values masked): a reshuffle moves things, it never changes the place.
 - `determinism.js` — the same seed at 1600×900 and 2560×1080 builds the same
   world (`App.t − App.elapsed`, wetness, per-mesh instance counts; the window
-  frame is cut to the window and is left out).
+  frame is cut to the window and is left out, but its child count is compared),
+  plus a hash of every mesh's vertex / instance buffers.
+- `shaders.js` — every shader source the page builds (all biomes × seed
+  `8badf00d` × the four lock sets above) is hashed and compared with
+  `tests/shader-hashes.json`. A build-system or refactoring change must leave
+  it green; when a shader is *meant* to change, run `node shaders.js --update`
+  and commit the new file with it.
 
 Browser tests need a WebGL2 Chromium and the network (Three.js comes from a
-CDN). The browser is `$BROWSER` (a path), else Playwright's `msedge` channel,
-then `chrome`, then its bundled Chromium; Windows uses the GPU through ANGLE,
-elsewhere SwiftShader. CI runs only the static half — hosted runners have no GPU.
+CDN). The browser is `$WINDOW_BROWSER` (a path) if set, then Playwright's `msedge` channel,
+`chrome`, then its bundled Chromium; the other settings are `--options` or
+`WINDOW_BIOMES`, `WINDOW_SEEDS`, `WINDOW_LOCKS`, `WINDOW_COUNT`; a mistyped option
+exits 2 with the usage; Windows uses the GPU through ANGLE,
+elsewhere SwiftShader. CI runs the static half, plus a four-biome `scenes.js --quick` smoke test on
+SwiftShader (hosted runners have no GPU, so the rest runs locally).
 
 Not automated, but worth a run after shader work: the same scene loop with
 `--disable-webgl2` (a 96×96 texture-resize warning is expected on WebGL1), and a
@@ -110,6 +134,11 @@ and — importantly — anything three reports through `console.error` appears i
 red bar at the top of the window. Shader compile failures surface that way. Click
 to dismiss. This exists because a shader failure is otherwise silent: the ground
 simply doesn't draw and you see sky.
+
+The strip's `@line:col` counts lines of the built `index.html`. Turn it into a
+source position with `node build.js --where <line>` (e.g. `src/js/07-world.js:123`,
+or the GLSL table). The GLSL table is emitted after `00-errors.js`, so even a
+failure while expanding shader includes reaches the strip.
 
 ---
 
@@ -497,7 +526,8 @@ per vertex.
 ### Shared GLSL
 
 - `tone.glsl` — `tone()`: hue-preserving shoulder, small toe, the grade. Every
-  fragment shader ends with it.
+  fragment shader that draws the world ends with it; the post passes, the glows,
+  motes, beacon and herd shadows (already toned, or additive) don't.
 - `horizon.glsl` — `horizonMix(dir, away, toward, sunDir)`: the azimuth blend
   the sky, the ridges and `horizonAt` share.
 - `common.glsl` (includes `horizon.glsl`) — `h2`/`vn` (sin-free hash, value noise), `bandAA` (box-filtered

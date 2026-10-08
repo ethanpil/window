@@ -1,5 +1,10 @@
 name: check
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
 jobs:
   static:
     runs-on: ubuntu-latest
@@ -8,12 +13,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # index.html is built from src/ and committed; it must be current.
-      - run: node build.js --check
-      # Static tests only (build check, syntax, lint). The browser tests
-      # (scenes, reshuffle, determinism) need a WebGL2 GPU, which hosted
-      # runners do not have, so they run locally: see CONTEXT.md.
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
       - run: npm ci
         working-directory: tests
+      # Build check (index.html is built from src/ and committed, so it must be
+      # current), syntax check of the script, and ESLint: any error fails.
       - run: npm run test:static
+        working-directory: tests
+  # A small slice of the browser tests on software WebGL (SwiftShader): a few
+  # landscapes load clean and are the biome that was asked for. The full run
+  # (every biome, shaders, determinism) needs a GPU and is done locally.
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+      - run: npm ci
+        working-directory: tests
+      - run: npx playwright-core install --with-deps chromium
+        working-directory: tests
+      # SwiftShader is slow, so the frame-time limit is far looser than the default.
+      - run: node scenes.js --quick --biomes meadow,urban,desert,fjord --max-frame 5000
         working-directory: tests

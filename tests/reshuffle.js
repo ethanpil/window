@@ -2,10 +2,11 @@
    description in #note (biome, season, weather, time, ...) is the same.
    Metre values are masked because a reshuffle may nudge them.
 
-     node reshuffle.js [--count 30] */
+     node reshuffle.js [--count 30]      (or WINDOW_COUNT) */
 'use strict';
 var lib = require('./lib');
-var N = +lib.option('count', 30);
+lib.parse('node reshuffle.js [--count N]', ['count'], []);
+var N = lib.count('count', 30);
 
 (async function () {
   var srv = await lib.serve();

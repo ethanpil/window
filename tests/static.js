@@ -1,9 +1,11 @@
 /* Static checks: index.html is what src/ builds, its script parses, and
-   ESLint finds no real bugs in it (undefined names, duplicate keys, ...). */
+   ESLint finds no real bugs in it (undefined names, duplicate keys, ...).
+   Any lint error fails; findings are reported as src/js/NN-x.js:line. */
 'use strict';
 var fs = require('fs'), os = require('os'), path = require('path'), cp = require('child_process');
 var ESLint = require('eslint').ESLint;
 var lib = require('./lib');
+var builder = require('../build.js');
 
 var failed = false;
 function step(name, ok, detail) {
@@ -20,7 +22,11 @@ function step(name, ok, detail) {
   var html = fs.readFileSync(lib.INDEX, 'utf8');
   var scripts = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g));
   if (!scripts.length) { step('extract app script', false, 'no inline <script> in index.html'); process.exit(1); }
-  var code = scripts[scripts.length - 1][1];
+  var last = scripts[scripts.length - 1], code = last[1];
+  /* the script's first line is the one holding the <script> tag */
+  var firstLine = html.slice(0, last.index + '<script>'.length).split('\n').length;
+  var map = builder.build().map;
+  var at = function (line) { return builder.where(firstLine + line - 1, map); };
 
   var dir = fs.mkdtempSync(path.join(os.tmpdir(), 'window-app-'));
   var file = path.join(dir, 'app.js');
@@ -29,20 +35,12 @@ function step(name, ok, detail) {
   fs.rmSync(dir, { recursive: true, force: true });
   step('node --check app script', s.status === 0, s.status === 0 ? '' : s.stderr.trim());
 
-  /* 3. lint */
+  /* 3. lint: every error fails */
   var eslint = new ESLint({ useEslintrc: false, overrideConfigFile: path.join(__dirname, 'eslint.json') });
   var res = (await eslint.lintText(code, { filePath: 'index.html.app.js' }))[0];
-  /* eslint-known.json lists findings already in the code (rule: message -> count).
-     They are reported but do not fail; anything beyond them does. */
-  var known = JSON.parse(fs.readFileSync(path.join(__dirname, 'eslint-known.json'), 'utf8'));
-  var errors = [], baselined = 0;
-  res.messages.filter(function (m) { return m.severity === 2; }).forEach(function (m) {
-    var key = m.ruleId + ': ' + m.message;
-    if (known[key] > 0) { known[key]--; baselined++; } else errors.push(m);
-  });
-  var warns = res.messages.length - errors.length - baselined;
-  step('eslint', errors.length === 0, errors.length + ' new errors, ' + baselined + ' known (eslint-known.json), ' + warns + ' warnings');
-  errors.slice(0, 20).forEach(function (m) { console.log('   app:' + m.line + ':' + m.column + ' ' + m.ruleId + ' ' + m.message); });
+  var errors = res.messages.filter(function (m) { return m.severity === 2; });
+  step('eslint', errors.length === 0, errors.length + ' errors, ' + (res.messages.length - errors.length) + ' warnings');
+  errors.slice(0, 30).forEach(function (m) { console.log('   ' + at(m.line) + ':' + m.column + ' ' + m.ruleId + ' ' + m.message); });
 
   process.exit(failed ? 1 : 0);
 })().catch(function (e) { console.error(e); process.exit(1); });
