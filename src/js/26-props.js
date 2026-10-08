@@ -166,7 +166,7 @@ function scatterGroups(P, H, spec, grow, lim, S) {
     var base = S.range(spec.size[0], spec.size[1]);
     for (var m = 0; m < n * 3 && n > 0 && items.length < spec.count; m++) {
       var x = c[0] + S.gauss() * sig, z = c[1] + S.gauss() * sig;
-      var sz = clamp(base * S.range(0.78, 1.18), spec.size[0], spec.size[1]);
+      sz = clamp(base * S.range(0.78, 1.18), spec.size[0], spec.size[1]);
       if (!fits(x, z, sz, 0.32)) continue;
       items.push([x, z, sz]);
       n--;

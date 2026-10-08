@@ -102,7 +102,6 @@ function buildHerd(scene, P, R, U, H) {
   geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 4));
   geo.setAttribute('iGrad', new THREE.InstancedBufferAttribute(iGrad, 2));
   geo.instanceCount = made;
-  /* src/shaders/wander.glsl */
   var mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime, uCamPos: U.uCamPos, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol,

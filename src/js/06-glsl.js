@@ -4,26 +4,27 @@
 /* The shaders live in src/shaders/ and build.js inlines them as the GLSL
    table. A material reads the table by file name when the source is fixed, or
    goes through shader(name, { KEY: value }) when the file holds {{KEY}} tokens
-   for numbers the script owns. A token with no value, or a value with no token, is a
-   mistake and throws. Shared pieces are pulled in with #include "x.glsl". A line
-   starting /// in a shader file is a note for the reader: build.js drops it. */
+   for float constants the script owns. A token with no value, a value with no
+   token, or a value that isn't a float literal is a mistake and throws: "3"
+   or NaN would reach the driver as a GLSL type error on one landscape only.
+   Shared pieces are pulled in with #include "x.glsl". A line starting /// in a
+   shader file is a note for the reader: build.js drops it. */
+var GLSL_FLOAT = /^-?(\d+\.\d*|\.\d+)([eE][-+]?\d+)?$/;
 function shader(name, vars) {
-  var src = GLSL[name], used = {};
+  if (!Object.prototype.hasOwnProperty.call(GLSL, name)) throw new Error('no shader ' + name);
+  var used = {};
   vars = vars || {};
-  src = src.replace(/\{\{(\w+)\}\}/g, function (all, key) {
+  var src = GLSL[name].replace(/\{\{(\w+)\}\}/g, function (all, key) {
     if (!Object.prototype.hasOwnProperty.call(vars, key)) throw new Error('shader ' + name + ' wants ' + key);
+    var v = vars[key];
+    if (typeof v === 'number' && isFinite(v)) v = v % 1 ? String(v) : v.toFixed(1);
+    if (typeof v !== 'string' || !GLSL_FLOAT.test(v)) throw new Error('shader ' + name + ': ' + key + ' must be a float, not ' + vars[key]);
     used[key] = true;
-    return String(vars[key]);
+    return v;
   });
   Object.keys(vars).forEach(function (key) { if (!used[key]) throw new Error('shader ' + name + ' has no ' + key); });
   return src;
 }
-/* src/shaders/tone.glsl */
-
-/* src/shaders/horizon.glsl */
-
-/* src/shaders/common.glsl */
-
 /* ---------- preferences ----------
    localStorage first, a cookie second, memory last. A sandboxed frame has an
    opaque origin and will throw on both, so nothing here may be assumed. */

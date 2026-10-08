@@ -398,11 +398,11 @@ function drawPropSprite(g, S, kind, P, R, opts) {
       var f2 = ti / (tiers - 1);
       var yb = S * (0.86 - f2 * 0.74);
       var span = S * (0.30 - f2 * 0.24) * R.range(0.85, 1.15);
-      for (var side = -1; side <= 1; side += 2) {
+      for (side = -1; side <= 1; side += 2) {
         var lit2 = 0.62 + f2 * 0.2;
         var nn = 10 + Math.floor(span / S * 40);
-        for (var q = 0; q < nn; q++) {
-          var t = q / nn, bx = S / 2 + side * span * t, by = yb + t * t * span * 0.35;
+        for (q = 0; q < nn; q++) {
+          t = q / nn; bx = S / 2 + side * span * t; by = yb + t * t * span * 0.35;
           var pc = pdark.clone().lerp(plite, clamp(lit2 + R.range(-0.2, 0.15), 0, 1));
           g.strokeStyle = 'rgb(' + ((pc.r * 255) | 0) + ',' + ((pc.g * 255) | 0) + ',' + ((pc.b * 255) | 0) + ')';
           g.lineWidth = R.range(1.1, 2.2);
@@ -472,7 +472,8 @@ function drawPropSprite(g, S, kind, P, R, opts) {
     var bc = new THREE.Color('#8e9a80'), bl2 = new THREE.Color('#d5d9c0');
     var drx = S * R.range(0.40, 0.46), dry = S * R.range(0.62, 0.78);
     for (var bs = 0; bs < 110; bs++) {
-      var ba2 = -Math.PI * R.f(), bd = Math.sqrt(R.f());
+      ba2 = -Math.PI * R.f();
+      var bd = Math.sqrt(R.f());
       /* up from the foot: the angle runs below the horizontal */
       var bx3 = S / 2 + Math.cos(ba2) * bd * drx, by3 = S - Math.abs(Math.sin(ba2)) * bd * dry * 0.95;
       leafSpray(g, bx3, by3, S * 0.05, bc.clone().multiplyScalar(0.62 + 0.38 * (S - by3) / dry), bl2, 9, S * 0.009, S * 0.016, R);
@@ -517,7 +518,7 @@ function drawPropSprite(g, S, kind, P, R, opts) {
        into a flat head, so the ellipse has to be tall enough that the
        squashed top still reaches the highest tip. */
     var ax0 = 1e9, ax1 = -1e9, ay0 = 1e9, ay1 = -1e9;
-    for (var ai = 0; ai < atips.length; ai++) {
+    for (ai = 0; ai < atips.length; ai++) {
       var atp = atips[ai];
       if (atp[0] < ax0) ax0 = atp[0];
       if (atp[0] > ax1) ax1 = atp[0];
@@ -551,7 +552,7 @@ function drawPropSprite(g, S, kind, P, R, opts) {
 
   } else if (kind === 'deadbush') {
     g.strokeStyle = '#8b7444';
-    for (var b2 = 0; b2 < 34; b2++) {
+    for (b2 = 0; b2 < 34; b2++) {
       var an = -Math.PI * R.range(0.12, 0.88);
       var ln = S * R.range(0.10, 0.28);
       var x1 = S / 2 + R.range(-0.06, 0.06) * S, y1 = S;
@@ -593,8 +594,8 @@ function drawPropSprite(g, S, kind, P, R, opts) {
   if (opts && opts.crownOnly) {
     /* erase the trunk below the crown so cards carry foliage only */
     g.globalCompositeOperation = 'destination-out';
-    var tw = kind === 'pine' ? 0.08 : 0.22;
-    g.fillRect(S * (0.5 - tw / 2), S * (kind === 'pine' ? 0.80 : 0.64), S * tw, S);
+    var cutW = kind === 'pine' ? 0.08 : 0.22;
+    g.fillRect(S * (0.5 - cutW / 2), S * (kind === 'pine' ? 0.80 : 0.64), S * cutW, S);
     g.globalCompositeOperation = 'source-over';
   }
 }
@@ -638,8 +639,6 @@ var SPRITE_CROWN = {
   cactus: [0.5, 0.5, 0.15, 4.0], rock: [0.5, 0.18, 0.44, 0.40]
 };
 function spriteCrown(kind) { var c = SPRITE_CROWN[kind] || SPRITE_CROWN.broadleaf; return new THREE.Vector4(c[0], c[1], c[2], c[3]); }
-/* src/shaders/sprite.vert.glsl */
-/* src/shaders/sprite.frag.glsl */
 
 function makeBirdTexture() {
   var S = 64, c = cnv(S, S), g = c.getContext('2d');

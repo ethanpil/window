@@ -72,16 +72,16 @@ function buildFalls(scene, P, R, U, H) {
   for (i = 0; i < picks.length; i++) {
     var pk = picks[i], ux = -pk[0], uz = -pk[1], ul = Math.sqrt(ux * ux + uz * uz) || 1;
     ux /= ul; uz /= ul;
-    var x0 = pk[0] - ux * 6.5, z0 = pk[1] - uz * 6.5, top = pk[2], line = [], lastH = top;
+    var x0 = pk[0] - ux * 6.5, z0 = pk[1] - uz * 6.5, fallTop = pk[2], line = [], lastH = fallTop;
     for (var sd = 0; sd < 300; sd += 2.5) {
       var px = x0 + ux * sd, pz = z0 + uz * sd, h = H(px, pz);
-      if (sd > 0 && (lastH - h < 0.35 || top - h > 180)) break;     /* the ground has levelled out */
+      if (sd > 0 && (lastH - h < 0.35 || fallTop - h > 180)) break;     /* the ground has levelled out */
       if (P.waterY != null && h < P.waterY + 0.3) { line.push([px, Math.max(h, P.waterY) + 0.6, pz]); break; }
       line.push([px, h + 1.2, pz]);
       lastH = h;
     }
-    if (line.length < 3) line = [[pk[0], top + 1.2, pk[1]], [pk[0], top - pk[3] * 0.5, pk[1]], [pk[0], top - pk[3], pk[1]]];
-    var drop = line[0][1] - line[line.length - 1][1];
+    if (line.length < 3) line = [[pk[0], fallTop + 1.2, pk[1]], [pk[0], fallTop - pk[3] * 0.5, pk[1]], [pk[0], fallTop - pk[3], pk[1]]];
+    var fallDrop = line[0][1] - line[line.length - 1][1];
     var start = pos.length / 3;
     /* the edges are set out here, across the line of sight from the window,
        and each sits on the ground under it: set out in the shader at the
@@ -93,7 +93,7 @@ function buildFalls(scene, P, R, U, H) {
         var ex = line[k][0] + rx * e * hw, ez = line[k][2] + rz * e * hw;
         pos.push(ex, Math.max(line[k][1] - 0.6, H(ex, ez) + 0.6), ez);
         side.push(e); along.push(k / (line.length - 1));
-        seeds.push(seedsR[i]); wids.push(pk[4]); lens.push(Math.max(drop, 10));
+        seeds.push(seedsR[i]); wids.push(pk[4]); lens.push(Math.max(fallDrop, 10));
       }
       if (k < line.length - 1) {
         var o = start + k * 2;

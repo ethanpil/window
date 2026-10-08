@@ -247,13 +247,13 @@ function makeHeightField(P) {
        concave slope of its own rubble, and on top of a hard bed with soft
        rock above it, a bench. Cut by side canyons, with an inner channel
        down the floor that the river runs in, or that lies dry. */
-    var cw = P.canyonW, cd = P.canyonDepth, cph = P.canyonPhase, cb = P.canyonBend;
+    var cw = P.canyonW, cd = P.canyonDepth, canyonPh = P.canyonPhase, cb = P.canyonBend;
     /* The canyon has its own frame: a runs along the axis, which heads
        canyonAng off straight ahead, p across it. The axis is set so the
        window stands canyonLedge back from the top of the uppermost wall. */
     var ksa = Math.sin(P.canyonAng || 0), kca = Math.cos(P.canyonAng || 0);
-    var cxAt = function (a) { return cb * (Math.sin(a * 0.0026 + cph) - Math.sin(cph)) + Math.sin(a * 0.011 + cph * 2) * cw * 0.10; };
-    var biteAt = function (a) { return Math.pow(Math.max(0, Math.sin(a * 0.017 + cph * 1.7)), 6) * cw * 0.55; };
+    var cxAt = function (a) { return cb * (Math.sin(a * 0.0026 + canyonPh) - Math.sin(canyonPh)) + Math.sin(a * 0.011 + canyonPh * 2) * cw * 0.10; };
+    var biteAt = function (a) { return Math.pow(Math.max(0, Math.sin(a * 0.017 + canyonPh * 1.7)), 6) * cw * 0.55; };
     var p0 = cxAt(0) + (ksa < 0 ? -1 : 1) * (2.9 * (cw + biteAt(0)) + (P.canyonLedge || 0));
     P._canP0 = p0;
     var tb = bedTable(P), prof = [[0, 0, 0]], s0 = 0, e0 = 0, bi;
