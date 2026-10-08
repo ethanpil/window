@@ -65,7 +65,7 @@ function clearWorld() {
   App.flowerMeshes = App.propMeshes = null;
 }
 
-/* GLSL_COMMON declares the air and light every lit shader shares. Rather than
+/* common.glsl declares the air and light every lit shader shares. Rather than
    list them in each material, they are handed to every shader material once
    the world is built, before anything compiles: three only binds a uniform the
    material carries, and an unbound one reads as zero. */

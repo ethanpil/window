@@ -31,52 +31,8 @@ function buildDust(scene, P, R, U, H) {
       uMap: { value: makeCloudTexture(R.int(1, 99999)) }
     },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute vec3 iPos; attribute vec4 iAttr;',
-      'uniform float uTime, uWind, uGust, uFogDensity;',
-      'uniform vec2 uWindDir; uniform vec3 uCamPos, uFogCol, uSunDir;',
-      'varying vec2 vUv; varying float vFog; varying float vFade; varying float vScroll; varying vec3 vAir;',
-      GLSL_COMMON,
-      'void main(){',
-      '  float speed = (0.5 + 0.9 * uGust) * uWind * iAttr.w;',
-      /* A sheet keeps the height of the ground it set out from, so it may
-         only travel a short way before rising or falling ground shows it up:
-         it runs ninety metres, its foot a third of its height below the
-         ground, and fades in its lower edge, so it neither slices through a
-         dune nor hangs a hard edge in the air. */
-      '  float span = 90.0;',
-      '  float run = mod(uTime * speed + iAttr.z, span) - span * 0.5;',
-      '  vec3 wp = iPos + vec3(uWindDir.x, 0.0, uWindDir.y) * run;',
-      '  wp.y += iAttr.y * 0.18 + sin(uTime * 0.21 + iAttr.z) * 0.12;',
-      '  vec3 toCam = normalize(vec3(uCamPos.x - wp.x, 0.0, uCamPos.z - wp.z));',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 pp = wp + right * position.x * iAttr.x + vec3(0.0, position.y * iAttr.y, 0.0);',
-      '  vUv = uv;',
-      '  vScroll = uTime * 0.012 + iAttr.z * 0.01;',
-      '  vFade = 1.0 - smoothstep(span * 0.28, span * 0.49, abs(run));',
-      '  vec4 mv = modelViewMatrix * vec4(pp, 1.0);',
-      '  vFog = fogAmtH(-mv.z, uFogDensity, pp.y);',
-      /* the air it hangs in is the horizon's colour that way */
-      '  vAir = horizonAt(normalize(pp - cameraPosition), uFogCol, uSunDir);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'uniform sampler2D uMap; uniform vec3 uAmbCol, uSunCol;',
-      'varying vec2 vUv; varying float vFog; varying float vFade; varying float vScroll; varying vec3 vAir;',
-      'void main(){',
-      '  float n = texture2D(uMap, vec2(vUv.x * 0.5 + vScroll, vUv.y * 0.5)).r;',
-      '  n = n * 0.65 + texture2D(uMap, vec2(vUv.x * 1.3 - vScroll * 1.7, vUv.y * 0.9 + 0.4)).r * 0.35;',
-      '  float body = smoothstep(0.30, 0.72, n);',
-      '  float soft = smoothstep(0.0, 0.35, vUv.x) * smoothstep(1.0, 0.65, vUv.x)',
-      '             * (1.0 - smoothstep(0.15, 1.0, vUv.y)) * smoothstep(0.12, 0.42, vUv.y);',
-      '  float a = body * soft * vFade * 0.30 * (1.0 - vFog * 0.6);',
-      '  vec3 col = mix(vAir, uAmbCol * 0.6 + uSunCol * 0.7, 0.45);',
-      '  gl_FragColor = vec4(col, a);',
-      '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['dust.vert'],
+    fragmentShader: GLSL['dust.frag']
   });
   mat.uniforms.uFogCol = U.uFogCol;
   var m = new THREE.Mesh(geo, mat);
@@ -163,54 +119,8 @@ function buildFalls(scene, P, R, U, H) {
        depth keeps the face it lies on from cutting it into bands far off */
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute float aSide, aAlong, aSeed, aWidth, aLen;',
-      'uniform vec3 uFogCol, uSunDir, uSunCol; uniform float uFogDensity;',
-      'varying vec2 vUv; varying float vFog; varying float vLen, vSeed, vW; varying vec3 vHaze;',
-      GLSL_COMMON,
-      'void main(){',
-      /* it spreads as it falls, and billows out into spray at the foot
-         (the edges are set out in the script) */
-      '  float dn = aAlong;',
-      '  float spread = 1.0 + dn * 0.5 + smoothstep(0.82, 1.0, dn) * 1.6;',
-      '  vec3 wp = position;',
-      '  vUv = vec2(aSide * 0.5 + 0.5, 1.0 - aAlong); vLen = aLen; vSeed = aSeed; vW = aWidth * spread;',
-      '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
-      '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
-      '  vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, vFog);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'uniform vec3 uAmbCol, uSunCol;',
-      'uniform float uTime;',
-      'varying vec2 vUv; varying float vFog; varying float vLen, vSeed, vW; varying vec3 vHaze;',
-      GLSL_COMMON,
-      'void main(){',
-      /* Streaks running down the drop, stretched along it and quickening as
-         they go; a puffy cloud texture read up it had made a dotted line.
-         The fine streaks fade to their mean once narrower than a pixel. */
-      '  float d = 1.0 - vUv.y;',
-      '  float along = pow(max(d, 0.0), 0.7) * vLen * 0.09;',   /* pow of a negative is undefined */
-      '  float x = vUv.x * vW * 0.9 + vSeed * 7.0;',
-      '  float s1 = vn(vec2(x, along - uTime * 2.2));',
-      '  float s2 = vn(vec2(x * 2.3 + 3.1, along * 1.9 - uTime * 4.1));',
-      '  float k2 = 1.0 - smoothstep(0.30, 0.85, fwidth(x) * 2.3);',
-      '  float n = s1 * 0.62 + mix(0.5, s2, k2) * 0.38;',
-      /* the edges wander as the water does */
-      '  float ew = vn(vec2(along * 0.25, vSeed)) * 0.18;',
-      '  float edge = smoothstep(0.0, 0.16 + ew, vUv.x) * smoothstep(1.0, 0.84 - ew, vUv.x);',
-      '  float a = edge * mix(0.75, 0.45, d) * smoothstep(0.25, 0.70, n);',
-      '  a += edge * (1.0 - smoothstep(0.0, 0.08, d)) * 0.35;',
-      /* spray at the foot: a soft cloud, not a hard end */
-      '  float foot = smoothstep(0.80, 1.0, d) * (1.0 - smoothstep(0.30, 0.50, abs(vUv.x - 0.5)) * 0.8);',
-      '  a = max(a, foot * 0.45 * (0.6 + 0.4 * s1));',
-      '  vec3 col = mix(vec3(0.86, 0.92, 0.95), uSunCol * 0.6 + uAmbCol * 0.8, 0.35);',
-      '  gl_FragColor = vec4(mix(col, vHaze, vFog), a * (1.0 - vFog * 0.85));',
-      '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['falls.vert'],
+    fragmentShader: GLSL['falls.frag']
   });
   mat.uniforms.uFogCol = U.uFogCol;
   var m = new THREE.Mesh(geo, mat);

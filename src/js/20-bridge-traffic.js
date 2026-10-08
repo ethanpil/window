@@ -341,80 +341,8 @@ function buildTraffic(scene, P, R, U, o) {
       uLift: { value: o.lift ? 1 : 0 }
     },
     extensions: { derivatives: true },
-    vertexShader: [
-      'attribute vec4 iAttr; attribute vec3 iCol; attribute vec4 iLane; attribute float aPart;',
-      'uniform float uTime, uFogDensity, uLen, uShadow, uNight, uLift;',
-      'uniform vec2 uDir;',
-      'uniform vec3 uOrigin, uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
-      'varying vec3 vCol; varying float vFog; varying vec3 vHaze; varying vec3 vLoc; varying float vEnd; varying float vPart; varying vec3 vNl; varying vec2 vKind;',
-      GLSL_COMMON,
-      'void main(){',
-      '  float dir = iLane.y, truck = iLane.w;',
-      '  float u = fract(iAttr.w + uTime * iLane.z / uLen * dir + 1.0);',
-      '  float along = (u - 0.5) * uLen;',
-      '  vec2 across = vec2(-uDir.y, uDir.x);',
-      /* each part's box within the vehicle (x along it, y up, z across),
-         as fractions of length, height and width */
-      '  vec3 lo = vec3(-0.5, 0.10, -0.5), hi = vec3(0.5, 0.52, 0.5);',
-      '  if (aPart > 0.5 && aPart < 1.5) { lo = mix(vec3(-0.30, 0.52, -0.42), vec3(-0.5, 0.10, -0.5), truck); hi = mix(vec3(0.20, 1.0, 0.42), vec3(0.24, 1.0, 0.5), truck); }',
-      '  if (aPart < 0.5) { lo = mix(lo, vec3(0.27, 0.10, -0.47), truck); hi = mix(hi, vec3(0.5, 0.80, 0.47), truck); }',
-      '  if (aPart > 1.5) { lo = vec3(-0.53, 0.0, -0.56); hi = vec3(0.53, 0.012, 0.56); }',
-      /* facing back down the road: the same shape mirrored (bounds, not a
-         negative scale, which would turn the faces inside out) */
-      '  if (dir < 0.0) { float t0 = lo.x; lo.x = -hi.x; hi.x = -t0; }',
-      '  vec3 q = mix(lo, hi, position + 0.5);',
-      '  vec3 lp = q * vec3(iAttr.x, iAttr.y, iAttr.z);',
-      '  vec2 xz = uOrigin.xz + uDir * (along + lp.x) + across * (iLane.x + lp.z);',
-      '  vec3 p = vec3(xz.x, uOrigin.y + lp.y + 0.02, xz.y);',
-      '  vec2 nxz = uDir * normal.x + across * normal.z;',
-      '  vec3 n = normalize(vec3(nxz.x, normal.y, nxz.y));',
-      '  float diff = max(dot(n, normalize(uSunDir)), 0.0);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(xz, uTime)) * mix(0.03, 1.0, bakedSun(p, uLift));',
-      '  vCol = iCol * (hemi(n, uAmbCol * 1.1) + uSunCol * diff * 1.05 * sh);',
-      /* paint and glass catch the sky on their tops */
-      '  vCol += uFogCol * 0.10 * smoothstep(0.5, 0.9, n.y);',
-      '  vCol = mix(vCol, vec3(0.025) * (1.0 + uAmbCol), step(1.5, aPart));',
-      /* which end this face is: +1 the front, -1 the back, 0 a side */
-      '  vEnd = normal.x * dir; vKind = vec2(truck, step(0.1, iLane.z));',
-      '  vLoc = position; vPart = aPart; vNl = normal;',
-      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  vFog = fogAmtH(-mv.z, uFogDensity, p.y);',
-      '  vHaze = hazeAt(uFogCol, normalize(p - cameraPosition), uSunDir, uSunCol, vFog);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'uniform float uNight;',
-      'varying vec3 vCol; varying float vFog; varying vec3 vHaze; varying vec3 vLoc; varying float vEnd; varying float vPart; varying vec3 vNl; varying vec2 vKind;',
-      'void main(){',
-      '  vec3 c = vCol;',
-      /* A car's cabin is glass all round below its roof; a lorry's cab is
-         glazed in its upper half and its box is blank. A dark band of tyres
-         and sill runs along the foot of the body. */
-      '  float truck = vKind.x, p0 = 1.0 - step(0.5, vPart), p1 = step(0.5, vPart) * step(vPart, 1.5);',
-      '  float wall = 1.0 - step(0.5, abs(vNl.y));',
-      '  float fw = fwidth(vLoc.y);',
-      '  float pane = mix(smoothstep(-0.42 - fw, -0.30 + fw, vLoc.y) * (1.0 - smoothstep(0.32 - fw, 0.42 + fw, vLoc.y)),',
-      '                   smoothstep(0.0 - fw, 0.08 + fw, vLoc.y) * (1.0 - smoothstep(0.38 - fw, 0.46 + fw, vLoc.y)) * (1.0 - step(0.5, -vEnd)), truck);',
-      '  float glass = mix(p1, p0, truck) * wall * pane;',
-      '  c = mix(c, vec3(0.05, 0.06, 0.07) + vHaze * 0.18, glass * 0.92);',
-      '  float lowK = mix(p0, p0 + p1, truck);',
-      '  c *= 1.0 - 0.75 * lowK * wall * (1.0 - smoothstep(mix(-0.30, -0.40, truck), mix(-0.18, -0.30, truck), vLoc.y));',
-      /* A pair of lamps at each end: warm white headlights in front, red
-         tail lights behind, lit while the vehicle is moving. Once a lamp is
-         under a pixel it fades to its share of the end face, so it cannot
-         flicker. */
-      '  float front = smoothstep(0.5, 0.9, vEnd), back = smoothstep(0.5, 0.9, -vEnd);',
-      '  float onLamp = mix(p0, p0 * front + p1 * back, truck);',
-      '  vec2 lq = vec2((abs(vLoc.z) - 0.33) / 0.11, (vLoc.y - mix(0.22, -0.26, truck)) / mix(0.13, 0.07, truck));',
-      '  float d = length(lq), fd = fwidth(d);',
-      '  float spot = 1.0 - smoothstep(0.7 - fd, 1.0 + fd, d);',
-      '  spot = mix(spot, 0.12, smoothstep(0.6, 2.5, fd)) * onLamp * vKind.y;',
-      '  c += (vec3(1.0, 0.92, 0.76) * 2.4 * front + vec3(1.0, 0.10, 0.06) * 1.5 * back) * spot * uNight;',
-      '  gl_FragColor = vec4(tone(mix(c, vHaze, vFog)), 1.0);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['traffic.vert'],
+    fragmentShader: GLSL['traffic.frag']
   });
   var mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -449,35 +377,8 @@ function buildGlows(scene, U, pts) {
   var mat = new THREE.ShaderMaterial({
     uniforms: { uTime: U.uTime, uCamPos: U.uCamPos, uNight: App.skyU.uNight, uSunCol: U.uSunCol, uFogDensity: U.uFogDensity },
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    vertexShader: [
-      'attribute vec3 iPos; attribute vec4 iGlow; attribute vec2 iMode;',
-      'uniform vec3 uCamPos, uSunCol; uniform float uTime, uNight, uFogDensity;',
-      'varying vec2 vUv; varying vec3 vC;',
-      GLSL_COMMON,
-      'void main(){',
-      '  vec3 toCam = uCamPos - iPos; float d = length(toCam); toCam /= d;',
-      '  vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), toCam));',
-      '  vec3 up = cross(toCam, right);',
-      '  float s = max(iGlow.x, d * 0.0042);',
-      '  float dim = 1.0 - smoothstep(0.25, 0.80, dot(uSunCol, vec3(0.30, 0.59, 0.11)));',
-      '  float on = iMode.x < 0.5 ? max(uNight, dim * 0.5) : (0.25 + 0.75 * uNight) * (0.3 + 0.7 * step(0.75, fract(uTime / 2.0 + iMode.y)));',
-      '  vec4 mv = modelViewMatrix * vec4(iPos, 1.0);',
-      '  vC = iGlow.yzw * on * clamp(iGlow.x * iGlow.x / (s * s), 0.18, 1.0) * (1.0 - fogAmt(-mv.z, uFogDensity) * 0.85);',
-      '  vec3 p = iPos + (right * position.x + up * position.y) * s;',
-      '  vUv = uv;',
-      '  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);',
-      /* unlit (a lamp by day): put it outside the view, so it costs no pixels */
-      '  if (on < 0.002) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      'varying vec2 vUv; varying vec3 vC;',
-      'void main(){',
-      '  float r = length(vUv - 0.5) * 2.0;',
-      '  float k = exp(-r * r * 5.0) * (1.0 - smoothstep(0.8, 1.0, r));',
-      '  gl_FragColor = vec4(vC * k, 1.0);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['glows.vert'],
+    fragmentShader: GLSL['glows.frag']
   });
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;

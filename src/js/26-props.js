@@ -200,50 +200,8 @@ function propMat(U, P, R, kind, swayMul, far) {
       },
       alphaToCoverage: true, alphaTest: 0.4,
       side: THREE.DoubleSide,
-      vertexShader: [
-        'attribute vec3 iPos; attribute vec3 iAttr;',
-        'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uSway, uAspect;',
-        'uniform vec2 uWindDir; uniform vec3 uCamPos, uSunCol, uAmbCol, uFogCol, uSunDir;',
-        'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
-        'varying vec2 vQ; varying float vFlip, vSh, vFade; varying vec3 vJit, vRight, vToCam, vAmb;',
-        GLSL_COMMON,
-        GLSL_SPRITE_V,
-        'void main(){',
-        '  float size = iAttr.x;',
-        '  vec3 toCam = normalize(vec3(uCamPos.x - iPos.x, 0.0, uCamPos.z - iPos.z));',
-        '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-        '  vec3 lp = right * position.x * size * uAspect + vec3(0.0, position.y * size, 0.0);',
-        '  float sway = sin(uTime * 0.62 + iAttr.y) * 0.5 + sin(uTime * 0.27 + iAttr.y * 2.1) * 0.5;',
-        '  lp.xz += uWindDir * sway * uWind * (0.35 + 0.75 * uGust) * position.y * position.y * size * uSway;',
-        '  vec3 wp = iPos + lp;',
-        '  vQ = uv; vFade = iAttr.z;',
-        '  vUv = spriteUv(uv, iAttr.y, vFlip, vJit);',
-        '  vJit *= 1.0 - uSnow * 0.25;',
-        '  vRight = right; vToCam = toCam;',
-        '  vec2 bk = bakedRG(wp.xz);',
-        '  vSh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-        '  vAmb = uAmbCol * 0.95 * mix(1.0, bk.y, 0.5);',
-        '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
-        '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
-        '  vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, vFog);',
-        '  gl_Position = projectionMatrix * mv;',
-        '}'
-      ].join('\n'),
-      fragmentShader: [
-      GLSL_TONE,
-        'uniform sampler2D uMap; uniform vec3 uFogCol, uSunDir, uSunCol; uniform vec4 uCrown;',
-        'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
-        'varying vec2 vQ; varying float vFlip, vSh, vFade; varying vec3 vJit, vRight, vToCam, vAmb;',
-        GLSL_COMMON,
-        GLSL_SPRITE_F,
-        'void main(){',
-        '  vec4 t = texture2D(uMap, vUv);',
-        '  if (t.a < 0.25) discard;',
-        '  vec3 light = spriteLight(vQ, uCrown, vFlip, vRight, vToCam, t.a, vAmb, vSh);',
-        '  gl_FragColor = vec4(mix(t.rgb * vJit * light, vHaze, vFog), smoothstep(0.3, 0.7, t.a) * vFade);',
-        '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-      ].join('\n')
+      vertexShader: GLSL['prop.vert'],
+      fragmentShader: GLSL['prop.frag']
     });
 }
 
@@ -487,33 +445,8 @@ function buildRoadPoles(scene, P, U, H) {
   var mat = new THREE.ShaderMaterial({
     uniforms: { uFogCol: U.uFogCol, uFogDensity: U.uFogDensity, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uHazeK: U.uHazeK },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute vec3 aB; attribute vec3 aP;',
-      'uniform float uFogDensity; uniform vec3 uFogCol, uSunDir, uSunCol;',
-      'varying float vA; varying float vFog; varying vec3 vHaze;',
-      GLSL_COMMON,
-      'void main(){',
-      '  float t = aP.x;',
-      '  vec3 p = mix(position, aB, t); p.y -= aP.z * 4.0 * t * (1.0 - t);',
-      '  vec3 tg = normalize(aB - position + vec3(0.0, -aP.z * 4.0 * (1.0 - 2.0 * t), 0.0));',
-      '  vec3 toC = cameraPosition - p; float d = length(toC);',
-      '  vec3 sd = normalize(cross(tg, toC / d));',
-      '  float w = max(0.018, d * 0.0016);',
-      '  vA = clamp(0.018 / w, 0.07, 1.0);',
-      '  p += sd * aP.y * w * 0.5;',
-      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  vFog = fogAmtH(-mv.z, uFogDensity, p.y);',
-      '  vHaze = hazeAt(uFogCol, normalize(p - cameraPosition), uSunDir, uSunCol, vFog);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'varying float vA; varying float vFog; varying vec3 vHaze;',
-      'void main(){',
-      '  gl_FragColor = vec4(tone(mix(vec3(0.04, 0.04, 0.045), vHaze, vFog)), vA * 0.9);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['road-poles.vert'],
+    fragmentShader: GLSL['road-poles.frag']
   });
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;

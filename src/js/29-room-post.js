@@ -193,34 +193,16 @@ function setupPost() {
     cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1),
     sceneQ: new THREE.Scene()
   };
-  var VS = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
+  var VS = GLSL['post.vert'];
   P.matBright = new THREE.ShaderMaterial({
     uniforms: { tex: { value: null }, uStep: { value: new THREE.Vector2(1 / (3 * qw), 1 / (3 * qh)) } }, depthTest: false, depthWrite: false,
     vertexShader: VS,
-    fragmentShader: [
-      'uniform sampler2D tex; uniform vec2 uStep; varying vec2 vUv;',
-      /* nine taps across the whole footprint of this small pixel, so a bright
-         speck in the big image cannot drop in and out of the glow */
-      'void main(){',
-      '  vec3 c = vec3(0.0);',
-      '  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++)',
-      '    c += texture2D(tex, vUv + vec2(float(x), float(y)) * uStep).rgb;',
-      '  c /= 9.0;',
-      '  float l = dot(c, vec3(0.3, 0.59, 0.11));',
-      '  gl_FragColor = vec4(c * smoothstep(0.86, 1.0, l), 1.0); }'
-    ].join('\n')
+    fragmentShader: GLSL['bright.frag']
   });
   P.matBlur = new THREE.ShaderMaterial({
     uniforms: { tex: { value: null }, dir: { value: new THREE.Vector2(1, 0) } }, depthTest: false, depthWrite: false,
     vertexShader: VS,
-    fragmentShader: [
-      'uniform sampler2D tex; uniform vec2 dir; varying vec2 vUv;',
-      'void main(){',
-      '  vec3 c = texture2D(tex, vUv).rgb * 0.227;',
-      '  c += (texture2D(tex, vUv + dir * 1.385).rgb + texture2D(tex, vUv - dir * 1.385).rgb) * 0.316;',
-      '  c += (texture2D(tex, vUv + dir * 3.231).rgb + texture2D(tex, vUv - dir * 3.231).rgb) * 0.070;',
-      '  gl_FragColor = vec4(c, 1.0); }'
-    ].join('\n')
+    fragmentShader: GLSL['blur.frag']
   });
   P.matComp = new THREE.ShaderMaterial({
     uniforms: { tex: { value: null }, bloom: { value: null }, uTime: { value: 0 },
@@ -228,28 +210,12 @@ function setupPost() {
                 uTexel: { value: new THREE.Vector2(1 / sw, 1 / sh) } },
     depthTest: false, depthWrite: false,
     vertexShader: VS,
-    fragmentShader: [
-      'uniform sampler2D tex, bloom; uniform float uTime, uBloom; uniform vec2 uRes, uTexel; varying vec2 vUv;',
-      'void main(){',
-      '  vec2 o = uTexel * 0.36;',
-      '  vec3 c = (texture2D(tex, vUv + vec2(-o.x, -o.y)).rgb + texture2D(tex, vUv + vec2(o.x, -o.y)).rgb',
-      '          + texture2D(tex, vUv + vec2(-o.x, o.y)).rgb + texture2D(tex, vUv + vec2(o.x, o.y)).rgb) * 0.25;',
-
-      '  c += texture2D(bloom, vUv).rgb * uBloom;',
-      '  float l = dot(c, vec3(0.3, 0.59, 0.11));',
-      '  float g = fract(sin(dot(floor(vUv * uRes) + fract(uTime) * 61.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;',
-      '  c += g * 0.026 * (1.0 - l * 0.7);',
-      /* contrast and split-tone are in tone(), so every tier gets them */
-      /* temporal accumulation: the last frame is folded in, more when the view
-         is moving. Detail that flickered frame to frame settles; a pan gets a
-         touch of motion blur, which is what an eye sees too. */
-      '  gl_FragColor = vec4(c, 1.0); }'
-    ].join('\n')
+    fragmentShader: GLSL['comp.frag']
   });
   P.matBlit = new THREE.ShaderMaterial({
     uniforms: { tex: { value: null } }, depthTest: false, depthWrite: false,
     vertexShader: VS,
-    fragmentShader: 'uniform sampler2D tex; varying vec2 vUv; void main(){ gl_FragColor = vec4(texture2D(tex, vUv).rgb, 1.0); }'
+    fragmentShader: GLSL['blit.frag']
   });
   P.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), P.matComp);
   P.quad.frustumCulled = false;

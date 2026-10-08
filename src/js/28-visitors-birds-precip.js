@@ -115,45 +115,8 @@ function buildVisitors(scene, P, R, U, H) {
       uGround: { value: groundY }, uWalks: { value: kind === 'deer' ? 1 : 0 }
     },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute vec4 iAttr;',
-      'uniform float uTime, uFogDensity, uSize, uDist, uHeight, uPeriod, uCross, uGround, uWalks;',
-      'uniform vec3 uCamPos;',
-      'varying vec2 vUv; varying float vFade;',
-      GLSL_COMMON,
-      'void main(){',
-      '  float cyc = fract(uTime / uPeriod + iAttr.x + iAttr.z * 0.004);',
-      '  float span = uCross;',
-      '  float u = cyc / span;',
-      '  vFade = step(cyc, span) * smoothstep(0.0, 0.10, u) * smoothstep(1.0, 0.88, u);',
-      '  float side = iAttr.w > 0.0 ? 1.0 : -1.0;',
-      '  float travel = mix(-1.15, 1.15, u) * side;',
-      '  float d = uDist * iAttr.y + iAttr.z * 2.0;',
-      '  vec3 wp = vec3(travel * d * 0.75 + iAttr.z, uGround + uHeight + sin(uTime * 0.07 + iAttr.x * 6.0) * uHeight * 0.05, -d);',
-      '  float bob = uWalks * abs(sin(uTime * 1.6 + iAttr.x * 9.0)) * uSize * 0.045;',
-      '  wp.y += bob;',
-      '  vec3 toCam = normalize(vec3(uCamPos.x - wp.x, 0.0, uCamPos.z - wp.z));',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 up = uWalks > 0.5 ? vec3(0.0,1.0,0.0) : normalize(cross(toCam, right));',
-      '  vec3 p = wp + right * position.x * uSize * side + up * position.y * uSize;',
-      '  vUv = uv;',
-      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  vFade *= 1.0 - fogAmt(-mv.z, uFogDensity) * 0.9;',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'uniform sampler2D uMap; uniform vec3 uFogCol, uAmbCol, uSunCol;',
-      'varying vec2 vUv; varying float vFade;',
-      'void main(){',
-      '  vec4 t = texture2D(uMap, vUv);',
-      '  if (t.a < 0.05 || vFade <= 0.001) discard;',
-      '  vec3 c = t.rgb * (uAmbCol * 0.9 + uSunCol * 0.55);',
-      '  gl_FragColor = vec4(mix(c, uFogCol, 0.25), t.a * vFade);',
-      '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['visitors.vert'],
+    fragmentShader: GLSL['visitors.frag']
   });
   mat.uniforms.uFogCol = U.uFogCol;
   var m = new THREE.Mesh(geo, mat);
@@ -190,48 +153,8 @@ function buildBirds(scene, P, R, U) {
       uDrift: { value: R.range(-1, 1) }
     },
     transparent: true, depthWrite: false,
-    vertexShader: [
-      'attribute vec4 iAttr;',
-      'uniform float uTime, uFogDensity, uDrift; uniform vec3 uCamPos, uFogCol, uSunDir, uSunCol;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
-      GLSL_COMMON,
-      'void main(){',
-      '  vec3 wp; float flap;',
-      '  if (iAttr.w < 0.0) {',
-      '    float ang = uTime * 0.045 * abs(iAttr.w) + iAttr.x;',
-      '    float orbit = 34.0 + 46.0 * fract(iAttr.x * 0.37);',
-      '    wp = vec3(sin(ang) * orbit, iAttr.y + sin(ang * 0.7) * 5.0,',
-      '              -95.0 - 60.0 * fract(iAttr.x * 0.61) + cos(ang) * orbit);',
-      '    flap = 0.86 + 0.14 * sin(uTime * 1.6 + iAttr.x);',
-      '  } else {',
-      '    float t = uTime * 0.05 * iAttr.w + iAttr.x;',
-      '    float loop = 300.0;',
-      '    float px = mod(t * 250.0, loop) - loop * 0.5;',
-      '    float pz = -120.0 - 70.0 * sin(iAttr.x) - 30.0 * sin(t * 0.7);',
-      '    wp = vec3(px * (uDrift > 0.0 ? 1.0 : -1.0), iAttr.y + sin(t * 1.7) * 4.0, pz);',
-      '    flap = 0.55 + 0.45 * sin(uTime * 7.0 + iAttr.x * 5.0);',
-      '  }',
-      '  vec3 toCam = normalize(uCamPos - wp);',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 up = normalize(cross(toCam, right));',
-      '  vec3 p = wp + right * position.x * iAttr.z + up * position.y * iAttr.z * flap;',
-      '  vUv = uv;',
-      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  vFog = fogAmtH(-mv.z, uFogDensity, p.y);',
-      '  vHaze = hazeAt(uFogCol, normalize(p - cameraPosition), uSunDir, uSunCol, vFog);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'uniform sampler2D uMap;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
-      'void main(){',
-      '  vec4 t = texture2D(uMap, vUv);',
-      '  gl_FragColor = vec4(mix(t.rgb, vHaze, vFog), t.a * (1.0 - vFog) * 0.85);',
-      '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['birds.vert'],
+    fragmentShader: GLSL['birds.frag']
   });
   mat.uniforms.uFogCol = U.uFogCol;
   var m = new THREE.Mesh(geo, mat);
@@ -272,44 +195,8 @@ function buildPrecip(scene, P, R, U) {
         uIntensity: { value: W.rain }
       },
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      vertexShader: [
-        'attribute vec3 iPos; attribute vec3 iAttr;',
-        'uniform float uTime, uWind, uGust, uFogDensity, uIntensity;',
-        'uniform vec2 uWindDir; uniform vec3 uCamPos;',
-        'varying float vA;',
-        GLSL_COMMON,
-        'void main(){',
-        '  float speed = 15.0 + iAttr.z * 12.0 + uGust * 6.0;',
-        '  float range = 34.0;',
-        '  float y = mod(iPos.y - uTime * speed, range);',
-        '  float slant = uWind * (0.35 + 0.5 * uGust) * 0.5;',
-        '  vec3 wp = vec3(iPos.x + uWindDir.x * (range - y) * slant * 0.35, y, iPos.z + uWindDir.y * (range - y) * slant * 0.35);',
-        /* an on-shore wind must not blow a drop through the glass: wrap the
-           drift back into the outdoor band, as the flakes do */
-        '  wp.z = mod(wp.z + 58.0, 56.5) - 58.0;',
-        '  vec3 dir = normalize(vec3(uWindDir.x * slant, -1.0, uWindDir.y * slant));',
-        '  vec3 toCam = normalize(uCamPos - wp);',
-        '  vec3 right = normalize(cross(dir, toCam));',
-        '  float dr = length(wp - cameraPosition);',
-        '  float grow = 1.0 + smoothstep(6.0, 40.0, dr) * 3.2;',
-        '  vec3 p = wp + right * position.x * iAttr.y * grow + dir * position.y * iAttr.x * 2.2;',
-        '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-        '  float d = -mv.z;',
-        '  vA = (1.0 - fogAmt(d, uFogDensity)) * uIntensity * (0.30 + 0.5 * smoothstep(2.0, 16.0, d)) * 0.75',
-        '     / grow * (1.0 - smoothstep(30.0, 46.0, dr));',
-        '  gl_Position = projectionMatrix * mv;',
-        '}'
-      ].join('\n'),
-      fragmentShader: [
-      GLSL_TONE,
-        'varying float vA;',
-        'uniform vec3 uAmbCol, uSunCol;',
-        'void main(){',
-        '  vec3 lit = vec3(0.80, 0.85, 0.92) * clamp(uAmbCol * 1.6 + uSunCol * 0.5, 0.10, 1.0);',
-        '  gl_FragColor = vec4(lit, vA);',
-        '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-      ].join('\n')
+      vertexShader: GLSL['precip.vert'],
+      fragmentShader: GLSL['precip.frag']
     });
     var rain = new THREE.Mesh(geo, mat);
     rain.frustumCulled = false;
@@ -363,54 +250,8 @@ function buildFlakes(scene, P, R, U, o) {
       uIntensity: { value: o.intensity }
     },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute vec3 iPos; attribute vec3 iAttr;',
-      'uniform float uTime, uWind, uGust, uFogDensity, uIntensity, uSway, uSpin;',
-      'uniform vec2 uWindDir; uniform vec3 uCamPos;',
-      'varying vec2 vUv; varying float vA;',
-      GLSL_COMMON,
-      'void main(){',
-      '  float range = 30.0;',
-      '  float fall = iAttr.z;',
-      '  float y = mod(iPos.y - uTime * fall, range);',
-      '  float age = range - y;',
-      '  float drift = uWind * (0.4 + 0.6 * uGust);',
-      '  vec3 wp = vec3(iPos.x, y, iPos.z);',
-      '  wp.x += sin(uTime * 0.45 * uSway + iAttr.y) * 0.9 * uSway + uWindDir.x * age * drift * 0.42;',
-      '  wp.z += cos(uTime * 0.37 * uSway + iAttr.y * 1.7) * 0.9 * uSway + uWindDir.y * age * drift * 0.42;',
-      '  wp.x = mod(wp.x + 45.0, 90.0) - 45.0;',
-      '  wp.z = mod(wp.z + 57.0, 56.0) - 57.0;',
-      '  vec3 toCam = normalize(uCamPos - wp);',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 up = normalize(cross(toCam, right));',
-      '  float sp = uSpin * (uTime * 2.1 + iAttr.y * 4.0);',
-      '  vec2 q = vec2(position.x * cos(sp) - position.y * sin(sp),',
-      '               position.x * sin(sp) + position.y * cos(sp));',
-      '  float squash = mix(1.0, 0.35 + 0.65 * abs(sin(uTime * 1.7 + iAttr.y)), uSpin);',
-      '  float df = length(wp - cameraPosition);',
-      '  float grow = 1.0 + smoothstep(6.0, 36.0, df) * 2.2;',
-      '  vec3 p = wp + right * q.x * iAttr.x * grow + up * q.y * iAttr.x * squash * grow;',
-      '  vUv = uv;',
-      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  float d = -mv.z;',
-      '  vA = (1.0 - fogAmt(d, uFogDensity)) * uIntensity * smoothstep(1.2, 5.0, d)',
-      '     / (0.6 + 0.4 * grow) * (1.0 - smoothstep(28.0, 44.0, df));',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'uniform sampler2D uMap; uniform vec3 uColour, uAmbCol, uSunCol;',
-      'uniform float uSpin;',
-      'varying vec2 vUv; varying float vA;',
-      'void main(){',
-      '  float a = texture2D(uMap, vUv).a;',
-      '  if (uSpin > 0.5) a = smoothstep(0.25, 0.6, a);',
-      '  vec3 c = uColour * clamp(uAmbCol * 1.5 + uSunCol * 0.6, 0.12, 1.0);',
-      '  gl_FragColor = vec4(c, a * vA * 0.9);',
-      '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['flakes.vert'],
+    fragmentShader: GLSL['flakes.frag']
   });
   var mesh = new THREE.Mesh(g2, m2);
   mesh.frustumCulled = false;

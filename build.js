@@ -10,7 +10,8 @@
    src/style.css    the stylesheet
    src/js/*.js      the script, in file-name order, inside one function scope
    src/shaders/*    GLSL, inlined as the GLSL table at the top of the script.
-                    A line  #include "name.glsl"  pulls in another file. */
+                    A line  #include "name.glsl"  pulls in another file; a
+                    line starting  ///  is a source-only note and is dropped. */
 'use strict';
 var fs = require('fs'), path = require('path');
 
@@ -24,14 +25,34 @@ function list(dir, re) {
 /* a shader file with its includes expanded; a cycle or a missing file is an error */
 function expand(name, dir, stack) {
   if (stack.indexOf(name) >= 0) throw new Error('shader include cycle: ' + stack.concat(name).join(' -> '));
-  var file = path.join(dir, name);
-  if (!fs.existsSync(file)) throw new Error('missing shader ' + name + (stack.length ? ' (included by ' + stack[stack.length - 1] + ')' : ''));
-  var text = read(file).replace(/\n$/, '');
-  return text.split('\n').map(function (line) {
-    var m = /^\s*#include\s+"([^"]+)"\s*$/.exec(line);
+  if (!fs.existsSync(path.join(dir, name))) throw new Error('missing shader ' + name + (stack.length ? ' (included by ' + stack[stack.length - 1] + ')' : ''));
+  return load(name, dir).split('\n').map(function (line) {
+    var m = INCLUDE.exec(line);
     return m ? expand(m[1], dir, stack.concat(name)) : line;
   }).join('\n');
 }
+
+/* a shader file as shipped: lines starting with /// are notes for the reader of
+   the source and are dropped, so they cost nothing in the page or the GPU */
+var INCLUDE = /^[ \t]*#include[ \t]+"([^"]+)"[ \t]*$/;
+function load(name, dir) {
+  return read(path.join(dir, name)).replace(/\n$/, '').split('\n')
+    .filter(function (line) { return !/^[ \t]*\/\/\//.test(line); }).join('\n');
+}
+
+/* The page carries each file once and expands its includes when it starts, so
+   common.glsl is not repeated in every shader that uses it. */
+var EXPANDER = [
+  'var GLSL = (function (src) {',
+  '  var out = {};',
+  '  function ex(n) {',
+  '    if (!(n in out)) out[n] = src[n].replace(/^[ \\t]*#include[ \\t]+"([^"]+)"[ \\t]*$/gm, function (l, f) { return ex(f); });',
+  '    return out[n];',
+  '  }',
+  '  for (var n in src) ex(n);',
+  '  return out;',
+  '})({'
+].join('\n');
 
 function build() {
   var shell = read(path.join(SRC, 'shell.html'));
@@ -40,8 +61,9 @@ function build() {
 
   var sdir = path.join(SRC, 'shaders'), names = list(sdir, /\.(glsl|vert|frag)$/);
   if (names.length) {
-    var table = names.map(function (n) { return '  ' + JSON.stringify(n) + ': ' + JSON.stringify(expand(n, sdir, [])); });
-    js = '/* shaders, inlined from src/shaders by build.js */\nvar GLSL = {\n' + table.join(',\n') + '\n};\n' + js;
+    names.forEach(function (n) { expand(n, sdir, []); });      /* every include resolves, no cycles */
+    var table = names.map(function (n) { return '  ' + JSON.stringify(n) + ': ' + JSON.stringify(load(n, sdir)); });
+    js = '/* shaders, inlined from src/shaders by build.js */\n' + EXPANDER + '\n' + table.join(',\n') + '\n});\n' + js;
     /* every shader the script asks for must exist */
     var re = /GLSL\[\s*['"]([^'"]+)['"]\s*\]|shader\(\s*['"]([^'"]+)['"]/g, m;
     while ((m = re.exec(js))) {

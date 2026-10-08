@@ -226,83 +226,8 @@ function buildGrass(scene, P, R, U, H) {
   var mat = new THREE.ShaderMaterial({
     uniforms: uni,
     side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute vec3 iPos; attribute vec4 iAttr; attribute vec3 iAttr2;',
-      'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow, uFar0, uFar1, uTopY, uTopK, uEar;',
-      'uniform vec2 uWindDir;',
-      'uniform vec3 uSunDir, uSunCol, uAmbCol, uFogCol, uBase, uTip, uDry, uSnowCol, uTop;',
-      'varying vec3 vColor;',
-      GLSL_COMMON,
-      'void main(){',
-      /* Per instance, not per vertex, so the whole blade shrinks together.
-         A blade narrower than a pixel cannot be drawn without flickering, so
-         it is held at about a pixel across, and past that the blades are let
-         go and the ground carries the far field. */
-      '  float dCam = length(iPos - cameraPosition);',
-      '  float far = smoothstep(uFar0, uFar1, dCam);',
-      '  float yN = position.y;',
-      /* under real snow the grass is gone; a light fall leaves short pale stubs */
-      '  float bury = smoothstep(0.12, 0.50, uSnow);',
-      '  float h = iAttr.x * (1.0 - bury * 0.94) * (1.0 - far);',
-      '  float earB = uEar * smoothstep(0.66, 0.72, yN) * (1.0 - smoothstep(0.93, 1.0, yN));',
-      '  float w = max(iAttr.y, dCam * 0.0015) * (1.0 + earB * 1.9) * (1.0 - far * far);',
-      '  float rot = iAttr.z;',
-      '  float c = cos(rot), s = sin(rot);',
-      '  vec3 lp = vec3(position.x * w, yN * h, 0.0);',
-      '  lp.z += iAttr2.y * 0.20 * h * yN * yN;',
-      /* gusts sweep the field as patches, cat's paws, not as ruled lines */
-      '  float wave = gustWave(iPos.xz, uWindDir, uTime, 0.22, 1.55, iAttr2.x * 0.6);',
-      '  float wave2 = gustWave(iPos.xz, uWindDir, uTime, 0.061, 0.62, 2.1);',
-      /* two turbulence rhythms, on the blade's own clock */
-      '  float flut = sin(uTime * 2.7 + iAttr2.x) * 0.30 + sin(uTime * 1.25 + iAttr2.x * 1.7) * 0.22;',
-      '  float drive = uWind * (0.46 + 0.95 * uGust) * iAttr2.y;',
-      '  float gust = max(0.55 + 0.40 * wave + 0.30 * wave2, 0.0);',       /* what the whole field feels */
-      '  float shape = max(gust + flut, 0.0);',                             /* plus what this blade does */
-      '  float bf = drive * shape * 0.45;',
-      '  bf = bf / (1.0 + bf);',
-      '  float bend = bf * h * 0.8 * yN * yN * (1.0 - bury * 0.7);',
-      '  float gustBend = (drive * gust * 0.45) / (1.0 + drive * gust * 0.45) * h * 0.8;',
-      '  vec3 rp = vec3(lp.x * c - lp.z * s, lp.y, lp.x * s + lp.z * c);',
-      '  rp.xz += uWindDir * bend;',
-      '  rp.y -= bend * bend * 0.55;',
-      '  vec3 wp = iPos + rp;',
-      /* the lighting normal leans with the gust, not the flutter: light rolls across
-         the field in waves without any blade flickering on its own. Each edge
-         tilts off to its own side, so a blade reads as folded along its rib. */
-      '  vec3 side = vec3(c, 0.0, s) * sign(position.x) * 0.45 * (1.0 - far);',
-      '  vec3 N = normalize(vec3(-s, 0.62, c) + side + vec3(uWindDir.x, 0.0, uWindDir.y) * gustBend * 1.6 * (1.0 - far));',
-      '  vec3 sd = normalize(uSunDir);',
-      '  float diff = max(dot(N, sd), 0.0);',
-      '  float trans = pow(max(dot(-N, sd), 0.0), 2.5) * 0.42 * smoothstep(0.1, 0.8, yN) * (1.0 - far * 0.8);',
-      /* a satin sheen where the sun glances off the blade: keyed to the gust,
-         so it sweeps the field in waves and no single blade twinkles */
-      '  vec3 Ng = normalize(vec3(-s, 0.62, c) + vec3(uWindDir.x, 0.0, uWindDir.y) * gustBend * 1.6);',
-      '  float sheen = pow(max(dot(reflect(-sd, Ng), normalize(cameraPosition - wp)), 0.0), 12.0) * 0.20 * yN * (1.0 - far);',
-      '  float ao = mix(0.42, 1.0, smoothstep(0.0, 0.55, yN));',
-      '  vec2 bk = bakedRG(wp.xz);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-      '  vec3 col = mix(uBase, uTip, clamp(yN * 1.05, 0.0, 1.0));',
-      '  col = mix(col, uDry, iAttr.w * 0.55);',
-      '  col = mix(col, uTop, smoothstep(uTopY, uTopY + 0.08, yN) * uTopK);',
-      '  col *= iAttr2.z * (1.0 - 0.18 * uWet);',
-      '  vec3 lit = col * (bk.y * hemi(N, uAmbCol * 1.15) + uSunCol * (diff * 1.15 + trans + sheen) * sh) * ao;',
-      /* one steady colour for the far field: no per-blade variation left to alias */
-      '  vec3 mass = mix(mix(uBase, uTip, 0.62), uTop, uTopK * 0.3) * (uAmbCol * 1.15 + uSunCol * 0.70 * sh) * 0.94;',
-      '  lit = mix(lit, mass, far);',
-      /* whitened along the whole blade, so nothing dark pokes through the snow */
-      '  vec3 snowL = uAmbCol * 1.15 + uSunCol * max(sd.y, 0.0) * 1.25 * sh;',
-      '  lit = mix(lit, uSnowCol * (0.80 + 0.20 * yN) * snowL * 0.82, clamp(uSnow * 1.6, 0.0, 0.96));',
-      '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
-      '  float fg = fogAmt(-mv.z, uFogDensity);',
-      '  vColor = mix(lit, hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, fg), fg);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'varying vec3 vColor;',
-      'void main(){ gl_FragColor = vec4(tone(vColor), 1.0); }'
-    ].join('\n')
+    vertexShader: GLSL['grass.vert'],
+    fragmentShader: GLSL['grass.frag']
   });
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
@@ -393,53 +318,8 @@ function buildFlowers(scene, P, R, U, H) {
       transparent: false,
       alphaTest: 0.45,
       side: THREE.DoubleSide,
-      vertexShader: [
-        'attribute vec3 iPos; attribute vec3 iAttr; attribute vec2 iVar;',
-        'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow;',
-        'uniform vec2 uWindDir; uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
-        'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
-        GLSL_COMMON,
-        'void main(){',
-        '  float dF = length(iPos - cameraPosition);',
-        '  float gone = smoothstep(20.0, 34.0, dF);',
-        '  float size = iAttr.x * (1.0 - uSnow * 0.55) * (1.0 - gone);',
-        '  if (uSnow > 0.30) size = 0.0;',
-        '  vec3 toCam = normalize(vec3(uCamPos.x - iPos.x, 0.0, uCamPos.z - iPos.z));',
-        '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-        '  float lc = cos(iVar.y), ls = sin(iVar.y);',
-        '  vec2 q = vec2(position.x * lc - position.y * ls, position.x * ls + position.y * lc);',
-        '  vec3 lp = right * q.x * size * 0.8 + vec3(0.0, q.y * size * 3.0, 0.0);',
-        '  float wave = gustWave(iPos.xz, uWindDir, uTime, 0.22, 1.55, iAttr.y * 0.6);',
-        '  float flut = sin(uTime * 2.3 + iAttr.y) * 0.24 + sin(uTime * 1.1 + iAttr.y * 1.6) * 0.12;',
-        '  float drive = uWind * (0.46 + 0.95 * uGust) * iAttr.z;',
-        '  float bf = drive * max(0.55 + 0.4 * wave + flut, 0.0) * 0.45;',
-        '  bf = bf / (1.0 + bf);',
-        '  float bend = bf * size * 1.1 * position.y * position.y * (1.0 - gone);',
-        '  vec3 wp = iPos + lp;',
-        '  wp.xz += uWindDir * bend;',
-        '  float vi = mod(iVar.x, 4.0); float flip = step(3.5, iVar.x);',
-        '  float ux = mix(uv.x, 1.0 - uv.x, flip);',
-        '  vUv = vec2((vi + ux) * 0.25, uv.y);',
-        '  vec2 bk = bakedRG(wp.xz);',
-        '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-        '  vTint = uAmbCol * 0.85 * bk.y + uSunCol * 0.75 * sh;',
-        '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
-        '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
-        '  vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, vFog);',
-        '  gl_Position = projectionMatrix * mv;',
-        '}'
-      ].join('\n'),
-      fragmentShader: [
-      GLSL_TONE,
-        'uniform sampler2D uMap;',
-        'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
-        'void main(){',
-        '  vec4 t = texture2D(uMap, vUv);',
-        '  if (t.a < 0.02) discard;',
-        '  gl_FragColor = vec4(mix(t.rgb * vTint, vHaze, vFog), t.a);',
-        '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-      ].join('\n')
+      vertexShader: GLSL['flowers.vert'],
+      fragmentShader: GLSL['flowers.frag']
     });
     mat.uniforms.uFogCol = U.uFogCol;
     var m = new THREE.Mesh(geo, mat);

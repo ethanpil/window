@@ -102,19 +102,7 @@ function buildHerd(scene, P, R, U, H) {
   geo.setAttribute('iAttr', new THREE.InstancedBufferAttribute(iAttr, 4));
   geo.setAttribute('iGrad', new THREE.InstancedBufferAttribute(iGrad, 2));
   geo.instanceCount = made;
-  /* The wander, shared by the animal and its shadow so they never part:
-     a few metres either way, taking its time, with the ground's slope. The
-     animal faces the way it is walking across the view: a fixed facing had
-     sheep drifting backwards half the time. */
-  var WANDER = [
-    'vec3 wander(vec3 base, vec2 grad, float t, float ph){',
-    '  vec2 o = vec2(sin(t) * 3.4 + sin(t * 0.37 + ph) * 2.1, cos(t * 0.81 + ph) * 3.0 + cos(t * 0.29) * 1.8);',
-    '  return vec3(base.x + o.x, base.y + dot(grad, o), base.z + o.y);',
-    '}',
-    'vec2 wanderVel(float t, float ph){',
-    '  return vec2(cos(t) * 3.4 + 0.37 * cos(t * 0.37 + ph) * 2.1, -0.81 * sin(t * 0.81 + ph) * 3.0 - 0.29 * sin(t * 0.29) * 1.8);',
-    '}'
-  ].join('\n');
+  /* src/shaders/wander.glsl */
   var mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: U.uTime, uCamPos: U.uCamPos, uSunDir: U.uSunDir, uSunCol: U.uSunCol, uAmbCol: U.uAmbCol,
@@ -124,52 +112,8 @@ function buildHerd(scene, P, R, U, H) {
       uGraze: { value: Hd.graze }, uSpeed: { value: Hd.speed }, uFoot: { value: Hd.foot }
     },
     alphaToCoverage: true, alphaTest: 0.25, side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute vec3 iPos; attribute vec4 iAttr; attribute vec2 iGrad;',
-      'uniform float uTime, uFogDensity, uShadow, uGraze, uSpeed, uFoot;',
-      'uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
-      GLSL_COMMON,
-      WANDER,
-      'void main(){',
-      '  float size = iAttr.x, ph = iAttr.y, rate = iAttr.z;',
-      '  float t = uTime * uSpeed * rate + ph;',
-      '  vec3 wp = wander(iPos, iGrad, t, ph);',
-      /* head down to graze for long stretches, up now and then to look around */
-      '  float look = step(0.82, fract(t * 0.6 + ph * 0.13));',
-      '  float head = mix(uGraze, 0.0, look);',
-      '  vec3 toCam = normalize(vec3(uCamPos.x - wp.x, 0.0, uCamPos.z - wp.z));',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec2 vel = wanderVel(t, ph);',
-      '  right *= dot(vec3(vel.x, 0.0, vel.y), right) >= 0.0 ? 1.0 : -1.0;',
-      /* grazing tips the whole body forward a little, about the hooves, which
-         stand on the ground rather than the bottom edge of the card */
-      '  float lean = head * 0.22;',
-      '  float lc = cos(lean), ls = sin(lean);',
-      '  vec2 pp = vec2(position.x, position.y - uFoot);',
-      '  vec2 q = vec2(pp.x * lc - pp.y * ls, pp.x * ls + pp.y * lc);',
-      '  vec3 lp = right * q.x * size * 1.15 + vec3(0.0, q.y * size, 0.0);',
-      '  vec3 p = wp + lp;',
-      '  vec2 bk = bakedRG(wp.xz);',
-      '  float sh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-      '  vTint = bk.y * hemi(vec3(0.0, mix(-0.4, 0.8, position.y), 0.0), uAmbCol * 1.05) + uSunCol * 0.8 * sh;',
-      '  vUv = uv;',
-      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  vFog = fogAmtH(-mv.z, uFogDensity, p.y);',
-      '  vHaze = hazeAt(uFogCol, normalize(p - cameraPosition), uSunDir, uSunCol, vFog);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'uniform sampler2D uMap;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
-      'void main(){',
-      '  vec4 t = texture2D(uMap, vUv);',
-      '  if (t.a < 0.25) discard;',
-      '  gl_FragColor = vec4(tone(mix(t.rgb * vTint, vHaze, vFog)), smoothstep(0.3, 0.7, t.a));',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['herd.vert'],
+    fragmentShader: GLSL['herd.frag']
   });
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
@@ -196,44 +140,8 @@ function buildHerd(scene, P, R, U, H) {
     },
     transparent: true, depthWrite: false,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
-    vertexShader: [
-      'attribute vec3 iPos; attribute vec4 iAttr; attribute vec2 iGrad;',
-      'uniform float uTime, uSpeed, uFogDensity, uShadow;',
-      'uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol;',
-      'varying vec2 vUv; varying float vA;',
-      GLSL_COMMON,
-      WANDER,
-      'void main(){',
-      '  float size = iAttr.x, ph = iAttr.y, rate = iAttr.z;',
-      '  float t = uTime * uSpeed * rate + ph;',
-      '  vec3 wp = wander(iPos, iGrad, t, ph);',
-      '  vec3 toCam = normalize(vec3(uCamPos.x - wp.x, 0.0, uCamPos.z - wp.z));',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      /* long along the body, which always lies across the view, and pushed a
-         little away from a low sun */
-      '  vec3 sd = normalize(uSunDir);',
-      '  vec2 push = -sd.xz / max(sd.y, 0.35) * size * 0.18;',
-      '  vec3 lp = right * position.x * size * 0.80 + toCam * position.z * size * 0.34;',
-      '  vec3 p = wp + lp + vec3(push.x, 0.03, push.y);',
-      '  p.y += dot(iGrad, lp.xz + push);',        /* lying on the slope */
-      /* Stronger in sunshine, still there as a darker patch under cloud: as
-         dark as the sun's share of the light on level ground there, which is
-         what the baked shadows round it show. */
-      '  float sunL = dot(uSunCol, vec3(0.30, 0.59, 0.11)) * max(sd.y, 0.0) * mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime));',
-      '  float share = sunL / (sunL + dot(uAmbCol, vec3(0.30, 0.59, 0.11)) + 1e-3);',
-      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  vA = mix(0.20, 0.45, smoothstep(0.05, 0.55, share)) * (1.0 - fogAmtH(-mv.z, uFogDensity, p.y));',
-      '  vUv = uv;',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      'varying vec2 vUv; varying float vA;',
-      'void main(){',
-      '  float r = length((vUv - 0.5) * 2.0);',
-      '  gl_FragColor = vec4(0.0, 0.0, 0.0, vA * (1.0 - smoothstep(0.35, 1.0, r)));',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['herd-shadow.vert'],
+    fragmentShader: GLSL['herd-shadow.frag']
   });
   var sm = new THREE.Mesh(sgeo, smat);
   sm.frustumCulled = false;
@@ -360,42 +268,8 @@ function buildWaterLife(scene, P, R, U, H) {
         uSwim: { value: kind === 'duck' ? 1.0 : 0.0 }
       },
       alphaTest: 0.25, side: THREE.DoubleSide,
-      vertexShader: [
-        'attribute vec3 iPos; attribute vec4 iAttr;',
-        'uniform float uTime, uFogDensity, uSwim;',
-        'uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
-        'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
-        GLSL_COMMON,
-        'void main(){',
-        '  float size = iAttr.x, ph = iAttr.y, rate = iAttr.z, face = iAttr.w;',
-        '  float t = uTime * rate * 0.10 + ph;',
-        '  vec3 wp = iPos;',
-        /* ducks paddle in slow arcs and bob; a heron barely moves at all */
-        '  wp.x += (sin(t) * 2.6 + sin(t * 0.43 + ph) * 1.5) * uSwim;',
-        '  wp.z += (cos(t * 0.77 + ph) * 2.2 + cos(t * 0.31) * 1.2) * uSwim;',
-        '  wp.y += sin(uTime * 0.5 + ph) * 0.012 * uSwim;',
-        '  vec3 toCam = normalize(vec3(uCamPos.x - wp.x, 0.0, uCamPos.z - wp.z));',
-        '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam)) * face;',
-        '  vec3 lp = right * position.x * size * 1.1 + vec3(0.0, position.y * size, 0.0);',
-        '  vec3 p = wp + lp;',
-        '  vTint = uAmbCol * 1.1 + uSunCol * 0.85 * max(uSunDir.y, 0.0);',
-        '  vUv = uv;',
-        '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-        '  vFog = fogAmt(-mv.z, uFogDensity);',
-        '  vHaze = hazeAt(uFogCol, normalize(p - cameraPosition), uSunDir, uSunCol, vFog);',
-        '  gl_Position = projectionMatrix * mv;',
-        '}'
-      ].join('\n'),
-      fragmentShader: [
-        GLSL_TONE,
-        'uniform sampler2D uMap;',
-        'varying vec2 vUv; varying float vFog; varying vec3 vTint; varying vec3 vHaze;',
-        'void main(){',
-        '  vec4 t = texture2D(uMap, vUv);',
-        '  if (t.a < 0.25) discard;',
-        '  gl_FragColor = vec4(tone(mix(t.rgb * vTint, vHaze, vFog)), smoothstep(0.3, 0.7, t.a));',
-        '}'
-      ].join('\n')
+      vertexShader: GLSL['waterlife.vert'],
+      fragmentShader: GLSL['waterlife.frag']
     });
     var m = new THREE.Mesh(geo, mat);
     m.frustumCulled = false;

@@ -638,37 +638,8 @@ var SPRITE_CROWN = {
   cactus: [0.5, 0.5, 0.15, 4.0], rock: [0.5, 0.18, 0.44, 0.40]
 };
 function spriteCrown(kind) { var c = SPRITE_CROWN[kind] || SPRITE_CROWN.broadleaf; return new THREE.Vector4(c[0], c[1], c[2], c[3]); }
-/* Vertex side: which of the four variants an instance wears, mirrored or
-   not, and a little colour of its own (value +-8 %, a touch warmer or
-   cooler), all from its seed. */
-var GLSL_SPRITE_V = [
-  'vec2 spriteUv(vec2 q, float seed, out float flip, out vec3 jit){',
-  '  float v = floor(fract(seed * 7.31) * 4.0);',
-  '  flip = step(0.5, fract(seed * 3.17));',
-  '  float h = fract(seed * 13.7) * 2.0 - 1.0, val = fract(seed * 29.3) * 2.0 - 1.0;',
-  '  jit = (1.0 + 0.08 * val) * vec3(1.0 + 0.05 * h, 1.0, 1.0 - 0.06 * h);',
-  '  vec2 u = vec2(mix(q.x, 1.0 - q.x, flip), q.y) * 0.992 + 0.004;',
-  '  return (u + vec2(mod(v, 2.0), 1.0 - floor(v * 0.5))) * 0.5;',
-  '}'
-].join('\n');
-/* Fragment side: a normal for the card from where the pixel sits in the
-   crown ellipse (rounding off toward its rim), wrapped diffuse so the shade
-   side is not black, light through the thin edges when the sun is behind,
-   and the underside of the crown in its own shade. Needs GLSL_COMMON. */
-var GLSL_SPRITE_F = [
-  'vec3 spriteLight(vec2 q, vec4 crown, float flip, vec3 right, vec3 toCam, float alpha, vec3 amb, float sh){',
-  '  vec2 e = (q - vec2(mix(crown.x, 1.0 - crown.x, flip), crown.y)) / crown.zw;',
-  '  float r = length(e);',
-  '  e /= max(r, 1.0);',
-  '  vec3 N = normalize(right * e.x + vec3(0.0, e.y, 0.0) + toCam * (sqrt(max(1.0 - dot(e, e), 0.0)) + 0.2));',
-  '  vec3 L = normalize(uSunDir);',
-  '  float wrap = max((dot(N, L) + 0.45) / 1.45, 0.0);',
-  '  float thin = clamp(smoothstep(0.6, 1.15, r) + (1.0 - smoothstep(0.4, 0.9, alpha)), 0.0, 1.0);',
-  '  float trans = pow(max(dot(-toCam, L), 0.0), 2.0) * (0.2 + 0.8 * thin) * 0.6;',
-  '  float under = mix(0.55, 1.0, smoothstep(-1.0, 0.3, e.y));',
-  '  return hemi(N, amb) * under + uSunCol * (wrap * 1.0 * mix(0.7, 1.0, under) + trans) * sh;',
-  '}'
-].join('\n');
+/* src/shaders/sprite.vert.glsl */
+/* src/shaders/sprite.frag.glsl */
 
 function makeBirdTexture() {
   var S = 64, c = cnv(S, S), g = c.getContext('2d');

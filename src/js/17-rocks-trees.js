@@ -293,62 +293,8 @@ function buildNearTrees(scene, P, R, U, H, kind, items, spec) {
       uMap: { value: makeSprayTexture(kind, P, NR) }
     },
     alphaToCoverage: true, alphaTest: 0.4, side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute vec3 iPos; attribute vec3 iAttr; attribute vec4 iCrown; attribute float iRy;',
-      'uniform float uTime, uWind, uGust, uFogDensity, uShadow, uSnow;',
-      'uniform vec2 uWindDir; uniform vec3 uCamPos, uSunDir, uSunCol, uAmbCol, uFogCol;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
-      'varying vec3 vWp; varying vec4 vCrown; varying float vRy, vSh; varying vec3 vAmb;',
-      GLSL_COMMON,
-      'void main(){',
-      '  float size = iAttr.x, spin = iAttr.y, ph = iAttr.z;',
-      '  vec3 toCam = normalize(uCamPos - iPos);',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 up = normalize(cross(toCam, right));',
-      '  float c = cos(spin), s = sin(spin);',
-      '  vec2 q = vec2(position.x * c - (position.y - 0.5) * s, position.x * s + (position.y - 0.5) * c);',
-      '  vec3 lp = right * q.x * size + up * q.y * size;',
-      /* a slow common sway from the gust wave, a quicker rustle per spray */
-      '  float gustW = gustWave(iPos.xz, uWindDir, uTime, 0.22, 1.55, 0.0);',
-      '  float sway = gustW * 0.55 + sin(uTime * 1.9 + ph) * 0.30 + sin(uTime * 0.8 + ph * 1.4) * 0.15;',
-      '  lp.xz += uWindDir * sway * uWind * (0.3 + 0.7 * uGust) * size * 0.12;',
-      '  vec3 wp = iPos + vec3(0.0, size * 0.5, 0.0) + lp;',
-      '  vec2 bk = bakedRG(wp.xz);',
-      '  vSh = mix(1.0 - uShadow, 1.0, cloudShade(wp.xz, uTime)) * mix(0.03, 1.0, bk.x);',
-      '  vAmb = uAmbCol * mix(1.0, bk.y, 0.5) * (1.0 - uSnow * 0.2);',
-      '  vWp = wp; vCrown = iCrown; vRy = iRy;',
-      '  vUv = uv;',
-      '  vec4 mv = modelViewMatrix * vec4(wp, 1.0);',
-      '  vFog = fogAmtH(-mv.z, uFogDensity, wp.y);',
-      '  vHaze = hazeAt(uFogCol, normalize(wp - cameraPosition), uSunDir, uSunCol, vFog);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'uniform sampler2D uMap; uniform vec3 uSunDir, uSunCol, uCamPos;',
-      'varying vec2 vUv; varying float vFog; varying vec3 vHaze;',
-      'varying vec3 vWp; varying vec4 vCrown; varying float vRy, vSh; varying vec3 vAmb;',
-      GLSL_COMMON,
-      'void main(){',
-      '  vec4 t = texture2D(uMap, vUv);',
-      '  if (t.a < 0.25) discard;',
-      /* where this pixel sits in its crown, as a fraction of the crown */
-      '  vec3 e = (vWp - vCrown.xyz) / vec3(vCrown.w, vRy, vCrown.w);',
-      '  float r = length(e);',
-      '  vec3 N = e / max(r, 1e-3);',
-      '  vec3 L = normalize(uSunDir), V = normalize(uCamPos - vWp);',
-      '  float wrap = max((dot(N, L) + 0.5) / 1.5, 0.0);',
-      /* deep inside, the leaves see neither sun nor sky; at the rim, light
-         comes through them from behind */
-      '  float inner = smoothstep(0.1, 0.9, r);',
-      '  float under = mix(0.68, 1.0, smoothstep(-0.9, 0.3, N.y));',
-      '  float trans = pow(max(dot(-V, L), 0.0), 2.0) * smoothstep(0.55, 1.05, r) * 0.7;',
-      '  vec3 light = hemi(N, vAmb * 1.1) * mix(0.62, 1.0, inner) * under + uSunCol * (wrap * 1.1 * mix(0.5, 1.0, inner) * under + trans) * vSh;',
-      '  gl_FragColor = vec4(mix(t.rgb * light, vHaze, vFog), smoothstep(0.3, 0.7, t.a));',
-      '  gl_FragColor.rgb = tone(gl_FragColor.rgb);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['near-trees.vert'],
+    fragmentShader: GLSL['near-trees.frag']
   });
   var m = new THREE.Mesh(geo, cmat);
   m.frustumCulled = false;

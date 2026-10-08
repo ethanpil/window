@@ -440,42 +440,8 @@ function buildSmoke(scene, P, R, U, x, y, z, sz) {
       uOrigin: { value: new THREE.Vector3(x, y, z) }, uScale: { value: sz }
     },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    vertexShader: [
-      'attribute vec3 iAttr;',
-      'uniform float uTime, uWind, uFogDensity, uScale;',
-      'uniform vec2 uWindDir; uniform vec3 uCamPos, uOrigin, uFogCol, uSunDir, uSunCol, uAmbCol;',
-      'varying float vA; varying vec2 vUv; varying vec3 vTint;',
-      GLSL_COMMON,
-      'void main(){',
-      '  float life = fract(iAttr.x + uTime * 0.055);',
-      '  float rise = life * uScale * 2.6;',
-      '  vec3 wp = uOrigin + vec3(0.0, rise, 0.0);',
-      /* the wind bends the column over as it climbs */
-      '  wp.xz += uWindDir * life * life * uScale * (2.2 + 5.0 * uWind);',
-      '  wp.x += sin(uTime * 0.5 + iAttr.y) * life * uScale * 0.30;',
-      '  float size = uScale * (0.16 + life * 0.85) * iAttr.z;',
-      '  vec3 toCam = normalize(uCamPos - wp);',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 up = normalize(cross(toCam, right));',
-      '  vec3 p = wp + right * position.x * size + up * position.y * size;',
-      '  vA = smoothstep(0.0, 0.10, life) * (1.0 - smoothstep(0.35, 1.0, life)) * 0.42;',
-      '  vTint = uAmbCol * 1.2 + uSunCol * 0.55 * max(uSunDir.y, 0.0);',
-      '  vUv = uv;',
-      '  vec4 mv = modelViewMatrix * vec4(p, 1.0);',
-      '  vA *= 1.0 - fogAmt(-mv.z, uFogDensity);',
-      '  gl_Position = projectionMatrix * mv;',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      GLSL_TONE,
-      'varying float vA; varying vec2 vUv; varying vec3 vTint;',
-      'void main(){',
-      '  float d = length(vUv - 0.5);',
-      '  float a = vA * (1.0 - smoothstep(0.14, 0.5, d));',
-      '  if (a < 0.004) discard;',
-      '  gl_FragColor = vec4(tone(vTint * 0.92), a);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['smoke.vert'],
+    fragmentShader: GLSL['smoke.frag']
   });
   var m = new THREE.Mesh(geo, mat);
   m.frustumCulled = false;
@@ -491,30 +457,8 @@ function buildBeacon(scene, P, R, U, x, y, z, sz) {
     uniforms: { uTime: U.uTime, uCamPos: U.uCamPos, uNight: App.skyU.uNight,
                 uOrigin: { value: new THREE.Vector3(x, y, z) }, uScale: { value: sz } },
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-    vertexShader: [
-      'uniform vec3 uCamPos, uOrigin; uniform float uScale, uTime, uNight;',
-      'varying vec2 vUv; varying float vA;',
-      'void main(){',
-      /* brightest as the lamp sweeps past the window, every eight seconds */
-      '  float sweep = pow(max(sin(uTime * 0.78), 0.0), 8.0);',
-      '  vA = (0.12 + 0.88 * sweep) * (0.25 + 0.75 * uNight);',
-      '  vec3 toCam = normalize(uCamPos - uOrigin);',
-      '  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), toCam));',
-      '  vec3 up = normalize(cross(toCam, right));',
-      '  float s = uScale * (0.22 + 0.30 * sweep);',
-      '  vec3 p = uOrigin + right * position.x * s + up * position.y * s;',
-      '  vUv = uv;',
-      '  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);',
-      '}'
-    ].join('\n'),
-    fragmentShader: [
-      'varying vec2 vUv; varying float vA;',
-      'void main(){',
-      '  float d = length(vUv - 0.5) * 2.0;',
-      '  float core = 1.0 - smoothstep(0.0, 1.0, d);',
-      '  gl_FragColor = vec4(vec3(1.0, 0.95, 0.78) * core * vA, core * vA);',
-      '}'
-    ].join('\n')
+    vertexShader: GLSL['beacon.vert'],
+    fragmentShader: GLSL['beacon.frag']
   });
   var m = new THREE.Mesh(quad, mat);
   m.frustumCulled = false;
