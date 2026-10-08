@@ -1,11 +1,12 @@
 # Window — handoff notes
 
-A procedural window onto a landscape. One HTML file, no build step, no assets,
-no dependencies beyond Three.js r128 from a CDN. Every seed produces a different
-place, and the same seed always produces the same place — at any window size
-and any detail tier.
+A procedural window onto a landscape. It ships as one HTML file — no assets, no
+dependencies beyond Three.js r128 from a CDN — but is edited as many files under
+`src/` and joined by a dependency-free build script. Every seed produces a
+different place, and the same seed always produces the same place — at any
+window size and any detail tier.
 
-- **Deliverable:** `index.html` (~680 KB, one file)
+- **Deliverable:** `index.html` (~635 KB, one file, built from `src/` and committed)
 - **Runtime:** any browser with WebGL2 (it degrades on WebGL1 — see §5)
 - **Nothing is fetched but the page and Three.js.** Every texture is drawn on a
   `<canvas>` at build time; every sound is synthesised from noise buffers.
@@ -14,42 +15,77 @@ and any detail tier.
 
 ## 1. Working on it
 
-Open `index.html` in a browser. That is the whole story for running it.
+Open `index.html` in a browser. That is the whole story for running it — it
+works straight from disk and in a sandboxed iframe, which is why it stays one
+file.
+
+### The source and the build
+
+```
+src/shell.html      the page; @@STYLE@@ and @@APP@@ lines are filled by the build
+src/style.css       the stylesheet
+src/js/NN-name.js   the script in 36 slices, joined in file-name order inside
+                    one function scope ('use strict'); NN follows the numbered
+                    sections of §2, with section 7 split by builder
+src/shaders/        GLSL: one .vert/.frag per material, shared pieces as .glsl
+build.js            node build.js  → writes index.html
+                    node build.js --check → fails if index.html is stale
+```
+
+**Edit `src/`, then run `node build.js`, and commit `index.html` with it.** CI
+fails a push whose `index.html` doesn't match its `src/`.
+
+- The slices are not modules: every top-level `var` and `function` in any file
+  is visible to every other, exactly as in one script. Order matters only for
+  `var` initialisers that run at load (function declarations hoist), so keep a
+  table above the code that reads it at load time, and add new files with a
+  number that places them correctly.
+- **Shaders** are inlined by the build as a `GLSL` table at the top of the
+  script and read as `GLSL['water.frag']`. A line `#include "common.glsl"`
+  pulls in a shared piece; the page carries each file once and expands includes
+  when it starts. A line starting `///` is a note for the source and is dropped
+  — use it freely, it costs nothing in the page or the driver. Where a shader
+  needs JavaScript values, write `{{KEY}}` in the file and build it with
+  `shader('city.frag', { KEY: value })`, which throws on a missing or unused
+  key. The build fails if the script names a shader file that doesn't exist.
+- Line endings are LF (`.gitattributes`), because `--check` compares bytes.
 
 ### Checking a change
 
-There is **no test harness in this repository.** The Node harness and the
-`*_test.js` suite earlier versions of this file described lived outside it and
-are gone. What works now is a real browser, driven headless:
+`tests/` holds the checks (Node ≥ 18; its dependencies stay in `tests/`):
 
 ```
-# 1. syntax: extract the last <script> and check it
-node -e "const s=require('fs').readFileSync('index.html','utf8'); \
-  const m=[...s.matchAll(/<script>([\s\S]*?)<\/script>/g)]; \
-  require('fs').writeFileSync('app.js', m[m.length-1][1])" && node --check app.js
+cd tests && npm install      once
+npm run test:static          ~5 s: build --check, node --check on the built
+                             script, ESLint (tests/eslint.json) — what CI runs
+npm test                     ~15 min: static, then the browser tests
 ```
 
-2. **Every landscape loads clean.** Serve the folder on localhost and drive
-   Edge or Chromium with `playwright-core` (`--use-angle=d3d11
-   --ignore-gpu-blocklist` on Windows, so it uses the GPU). For each biome load
-   `?seed=8badf00d@b=<biome>,t=afternoon,w=clear,v=bare`, wait for
-   `#curtain.gone`, then fail on any `pageerror`, console error/warning, or
-   text in the error strip `#err`. Screenshot and **look**. Repeat with
-   `t=night,w=rainstorm,v=bare`, `t=golden,w=fair` (framed) and
-   `s=winter,w=snowfall,v=bare`, and a second seed.
-3. **Reshuffle keeps identity.** For ~30 seeds compare the scene description
-   (`#note`, with metre values masked) for `seed` and `seed#3` (URL-encode the
-   `#`). Must match every time.
-4. **WebGL1.** The same load loop with `--disable-webgl2`: no new errors. (A
-   96×96 texture-resize warning is expected.)
-5. **Lint** (optional): ESLint 8 with `no-undef`, `no-redeclare`,
-   `no-unused-vars`, `no-shadow` over `app.js`. Most `no-shadow` hits are
-   benign; an unused variable usually is dead code.
+- `static.js` — findings already in the code are listed in
+  `tests/eslint-known.json` and don't fail; any new error does. Shrink that list,
+  never grow it.
+- `scenes.js` — every landscape loads with no page error, console error or
+  warning, or text in the error strip `#err`. Default: 27 biomes × 2 seeds ×
+  `t=afternoon,w=clear,v=bare` and `t=night,w=rainstorm,v=bare`. Narrow it with
+  `--biomes urban,desert --seeds 8badf00d --locks "t=golden,w=fair"`, and add
+  `--shots out` to write screenshots — then **look** at them.
+- `reshuffle.js` — `seed` and `seed#3` give the same scene description (`#note`,
+  metre values masked): a reshuffle moves things, it never changes the place.
+- `determinism.js` — the same seed at 1600×900 and 2560×1080 builds the same
+  world (`App.t − App.elapsed`, wetness, per-mesh instance counts; the window
+  frame is cut to the window and is left out).
+
+Browser tests need a WebGL2 Chromium and the network (Three.js comes from a
+CDN). The browser is `$BROWSER` (a path), else Playwright's `msedge` channel,
+then `chrome`, then its bundled Chromium; Windows uses the GPU through ANGLE,
+elsewhere SwiftShader. CI runs only the static half — hosted runners have no GPU.
+
+Not automated, but worth a run after shader work: the same scene loop with
+`--disable-webgl2` (a 96×96 texture-resize warning is expected on WebGL1), and a
+look at a few scenes at `t=golden`, framed and `s=winter,w=snowfall`.
 
 To read internals from a test, serve a copy with `var App = {};` replaced by
-`var App = window.__App = {};` and evaluate against it.
-
-> **Edit `index.html`. Never edit `app.js`** — it is a throwaway extraction.
+`var App = window.__App = {};` (`tests/lib.js` does this).
 
 ### Invariants worth checking by hand
 
@@ -79,7 +115,8 @@ simply doesn't draw and you see sky.
 
 ## 2. Architecture
 
-One IIFE in thirteen numbered sections. The numbering is in the source; keep it.
+One script scope in thirteen numbered sections, split across `src/js/` (§1).
+The numbering is in the source and the file names; keep it.
 
 ```
  1. seeded randomness      RNG, layoutRng, noise (fbm2, ridged, tileFBM, vnoise)
@@ -88,7 +125,7 @@ One IIFE in thirteen numbered sections. The numbering is in the source; keep it.
                            WINDOW_TYPES, FINISHES, FLOWERS, WIND_NAMES, tintPalette
  4. seed → world params    buildParams: the whole pure-data description
  5. canvas texture factories   every texture, drawn with 2D canvas calls
- 6. shared GLSL            GLSL_TONE, GLSL_HORIZON, GLSL_COMMON
+ 6. shared GLSL            shader(); the GLSL itself lives in src/shaders/
  7. the world              every builder, the shadow bakes
  8. layout / framing       window geometry, camera, resize, post-processing
  9. weather over time      updateWeather: drives every uniform from the clock
@@ -111,7 +148,7 @@ seed string
        ├─ buildTerrain        → the mesh, and App.Hm, a sampler of the DRAWN mesh
        ├─ H = App.Hm          ← everything after this uses the drawn surface
        ├─ …the other builders
-       ├─ shareCommon         → hands GLSL_COMMON's uniforms to every material
+       ├─ shareCommon         → hands common.glsl's uniforms to every material
        ├─ App.t, App.wetness  ← from their own streams, before the bake
        ├─ updateWeather(App.t), bakeShadows → applyShadowMap
        └─ writeSeedToUrl, layout, updateHUD
@@ -324,9 +361,9 @@ wetness, mirage, cloud shift, the shadow and near maps, camera position.
 texture and cover, night, moon phase, rainbow).
 
 **`shareCommon(scene)`** runs once the world is built: every ShaderMaterial gets
-the uniforms GLSL_COMMON declares (fog shape, in-scatter, ground colour, wetness,
+the uniforms common.glsl declares (fog shape, in-scatter, ground colour, wetness,
 sky cloud mapping, near map) unless it carries its own. A uniform a material does
-not carry reads as zero — this is why a material that includes GLSL_COMMON
+not carry reads as zero — this is why a material that includes common.glsl
 doesn't list them.
 
 ### The two height functions
@@ -459,22 +496,25 @@ per vertex.
 
 ### Shared GLSL
 
-- `GLSL_TONE` — `tone()`: hue-preserving shoulder, small toe, the grade. Every
+- `tone.glsl` — `tone()`: hue-preserving shoulder, small toe, the grade. Every
   fragment shader ends with it.
-- `GLSL_HORIZON` — `horizonMix(dir, away, toward, sunDir)`: the azimuth blend
+- `horizon.glsl` — `horizonMix(dir, away, toward, sunDir)`: the azimuth blend
   the sky, the ridges and `horizonAt` share.
-- `GLSL_COMMON` — `h2`/`vn` (sin-free hash, value noise), `bandAA` (box-filtered
+- `common.glsl` (includes `horizon.glsl`) — `h2`/`vn` (sin-free hash, value noise), `bandAA` (box-filtered
   band), `bakedRG`/`baked`/`bakedSun`/`waterDepth`/`nearSun`, `fogT`/`fogAmt`/
   `fogAmtH` (Beer–Lambert blended toward exp² by `uFogShape`, closed-form height
   falloff by `uFogH`), `horizonAt`, `hazeToward`, `hazeAt` (in-scatter blue then
   horizon), `hemi(n, amb)` (sky above, `uGroundCol` below), `gustWave`,
   `cloudShade` (the sky's own clouds projected along the sun), `skyMirror` (sky
   gradient and clouds along a reflected ray, no geometry).
-- `GLSL_SPRITE_V`/`GLSL_SPRITE_F` — billboard sprites from a 2×2 atlas,
+- `sprite.vert.glsl`/`sprite.frag.glsl` — billboard sprites from a 2×2 atlas,
   mirrored and tinted per instance, lit as a rounded crown (`spriteLight`).
 
-**A shader that includes GLSL_COMMON must not define those names again, and a
-stage that calls them must include GLSL_COMMON itself.**
+- `wander.glsl` — the herds' wandering path and its velocity.
+
+All in `src/shaders/`, pulled in with `#include`. **A shader that includes
+`common.glsl` must not define those names again, and a stage that calls them
+must include it itself.**
 
 ### Textures
 
@@ -787,7 +827,7 @@ tower without its podium, a hedge dashed. → `userData.noTrim`.
 - **`pow` of a negative base is undefined** in GLSL: `pow(max(d, 0.0), k)`.
 - **Welding normals across hard edges** smoothed hip roofs into blobs: weld only
   `markSmooth` ranges.
-- **A shared GLSL helper is a shared name.** After `vn` moved into GLSL_COMMON,
+- **A shared GLSL helper is a shared name.** After `vn` moved into common.glsl,
   the cascade's fragment (which didn't include it) failed to compile.
 - **A shader-painted feature has no surface.** The canyon's river was a plane
   under the floor that planting and the boat still believed in; JS tests must
@@ -832,6 +872,8 @@ tower without its podium, a hedge dashed. → `userData.noTrim`.
 ### A new object
 
 - Instance it; animate it in the vertex shader from `uTime`.
+- Its shaders go in `src/shaders/<name>.vert`/`.frag` (`#include "common.glsl"`
+  for fog, light and shadow), read as `GLSL['<name>.vert']`.
 - Sit it on `App.Hm`; push it to `App.propMeshes`.
 - Draw its randomness from a sub-stream of its own (§2).
 - Register a shadow caster in `App._shadows` (thin and near: `App._casters`; a
