@@ -1,0 +1,15 @@
+{
+  "name": "window-tests",
+  "private": true,
+  "description": "Static and headless-browser checks for the Window landscape page",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node run.js",
+    "test:static": "node run.js static",
+    "test:browser": "node run.js browser"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "playwright-core": "^1.56.0"
+  }
+}

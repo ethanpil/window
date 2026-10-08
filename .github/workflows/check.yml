@@ -1,0 +1,19 @@
+name: check
+on: [push, pull_request]
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # index.html is built from src/ and committed; it must be current.
+      - run: node build.js --check
+      # Static tests only (build check, syntax, lint). The browser tests
+      # (scenes, reshuffle, determinism) need a WebGL2 GPU, which hosted
+      # runners do not have, so they run locally: see CONTEXT.md.
+      - run: npm ci
+        working-directory: tests
+      - run: npm run test:static
+        working-directory: tests

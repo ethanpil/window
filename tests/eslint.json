@@ -1,0 +1,23 @@
+{
+  "root": true,
+  "env": { "browser": true, "es2018": true },
+  "parserOptions": { "ecmaVersion": 2018, "sourceType": "script" },
+  "globals": { "THREE": "readonly" },
+  "rules": {
+    "no-undef": "error",
+    "no-dupe-keys": "error",
+    "no-dupe-args": "error",
+    "no-dupe-else-if": "error",
+    "no-duplicate-case": "error",
+    "no-unreachable": "error",
+    "no-self-assign": "error",
+    "no-func-assign": "error",
+    "no-const-assign": "error",
+    "no-redeclare": "error",
+    "use-isnan": "error",
+    "valid-typeof": "error",
+    "no-unused-vars": "warn",
+    "no-shadow": "off",
+    "no-use-before-define": "off"
+  }
+}
